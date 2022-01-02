@@ -2,13 +2,16 @@ import torch
 from collections import OrderedDict
 from os import path as osp
 from tqdm import tqdm
-
+from basicsr.utils.matlab_functions import imresize
 from basicsr.archs import build_network
 from basicsr.losses import build_loss
 from basicsr.metrics import calculate_metric
 from basicsr.utils import get_root_logger, imwrite, tensor2img
 from basicsr.utils.registry import MODEL_REGISTRY
 from .base_model import BaseModel
+import numpy as np
+import tempfile
+from torch.nn.functional import interpolate
 
 
 @MODEL_REGISTRY.register()
@@ -129,11 +132,11 @@ class SRModel(BaseModel):
                 self.output = self.net_g(self.lq)
             self.net_g.train()
 
-    def dist_validation(self, dataloader, current_iter, tb_logger, save_img):
+    def dist_validation(self, dataloader, current_iter, tb_logger, save_img, save_lq_img):
         if self.opt['rank'] == 0:
-            self.nondist_validation(dataloader, current_iter, tb_logger, save_img)
+            self.nondist_validation(dataloader, current_iter, tb_logger, save_img, save_lq_img)
 
-    def nondist_validation(self, dataloader, current_iter, tb_logger, save_img):
+    def nondist_validation(self, dataloader, current_iter, tb_logger, save_img, save_lq_img):
         dataset_name = dataloader.dataset.opt['name']
         with_metrics = self.opt['val'].get('metrics') is not None
         use_pbar = self.opt['val'].get('pbar', False)
@@ -151,54 +154,78 @@ class SRModel(BaseModel):
         if use_pbar:
             pbar = tqdm(total=len(dataloader), unit='image')
 
-        for idx, val_data in enumerate(dataloader):
-            img_name = osp.splitext(osp.basename(val_data['lq_path'][0]))[0]
-            self.feed_data(val_data)
-            self.test()
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            for idx, val_data in enumerate(dataloader):
+                img_name = osp.splitext(osp.basename(val_data['lq_path'][0]))[0]
+                self.feed_data(val_data)
+                self.test()
 
-            visuals = self.get_current_visuals()
-            sr_img = tensor2img([visuals['result']])
-            metric_data['img'] = sr_img
-            if 'gt' in visuals:
-                gt_img = tensor2img([visuals['gt']])
-                metric_data['img2'] = gt_img
-                del self.gt
+                visuals = self.get_current_visuals()
+                sr_img = tensor2img([visuals['result']])
+                sr_img_tensor = visuals['result']
+                metric_data['img'] = sr_img
+                metric_data['gt_lq'] = tensor2img([visuals['lq']])
+                metric_data['scale'] = self.opt['scale']
+                imwrite(sr_img, osp.join(tmpdirname, f'sr_{idx}.png'))
 
-            # tentative for out of GPU memory
-            del self.lq
-            del self.output
-            torch.cuda.empty_cache()
+                if 'gt' in visuals:
+                    gt_img = tensor2img([visuals['gt']])
+                    metric_data['img2'] = gt_img
+                    del self.gt
 
-            if save_img:
-                if self.opt['is_train']:
-                    save_img_path = osp.join(self.opt['path']['visualization'], img_name,
-                                             f'{img_name}_{current_iter}.png')
-                else:
-                    if self.opt['val']['suffix']:
-                        save_img_path = osp.join(self.opt['path']['visualization'], dataset_name,
-                                                 f'{img_name}_{self.opt["val"]["suffix"]}.png')
+                # tentative for out of GPU memory
+                del self.lq
+                del self.output
+                torch.cuda.empty_cache()
+
+                if save_img is not False:
+                    if self.opt['is_train']:
+                        save_img_path = osp.join(self.opt['path']['visualization'], img_name,
+                                                 f'{img_name}_{current_iter}.png')
                     else:
-                        save_img_path = osp.join(self.opt['path']['visualization'], dataset_name,
-                                                 f'{img_name}_{self.opt["name"]}.png')
-                imwrite(sr_img, save_img_path)
+                        if self.opt['val']['suffix']:
+                            save_img_path = osp.join(self.opt['path']['visualization'], dataset_name,
+                                                     f'{img_name}_{self.opt["val"]["suffix"]}')
+                        else:
+                            save_img_path = osp.join(self.opt['path']['visualization'], dataset_name,
+                                                     f'{img_name}_{self.opt["name"]}')
+                    imwrite(sr_img, save_img_path + '.png')
+                    if save_lq_img:
+                        imwrite(metric_data['gt_lq'], save_img_path + '_gt_lq.png')
+                        sr_lq = interpolate(sr_img_tensor, scale_factor=1.0 / self.opt['scale'], mode='nearest')
+                        sr_lq = tensor2img(sr_lq.squeeze(0))
+                        # sr_lq = imresize(sr_img, 1.0 / self.opt['scale'], antialiasing=True)
+                        imwrite(sr_lq, save_img_path + '_sr_lq.png')
+                        lq_diff = sr_lq - metric_data['gt_lq']
+                        min = np.min(lq_diff)
+                        max = np.max(lq_diff)
+                        lq_diff -= min
+                        lq_diff = lq_diff / (max - min)
+                        imwrite(lq_diff * 255, save_img_path + '_lq_diff.png')
+
+                if with_metrics:
+                    # calculate metrics
+                    for name, opt_ in self.opt['val']['metrics'].items():
+                        if 'fid' not in name:
+                            self.metric_results[name] += calculate_metric(metric_data, opt_)
+                if use_pbar:
+                    pbar.update(1)
+                    pbar.set_description(f'Test {img_name}')
+            if use_pbar:
+                pbar.close()
 
             if with_metrics:
-                # calculate metrics
-                for name, opt_ in self.opt['val']['metrics'].items():
-                    self.metric_results[name] += calculate_metric(metric_data, opt_)
-            if use_pbar:
-                pbar.update(1)
-                pbar.set_description(f'Test {img_name}')
-        if use_pbar:
-            pbar.close()
+                if 'fid' in self.opt['val']['metrics']:
+                    fid_metric_data = {}
+                    fid_metric_data['fake_path'] = tmpdirname
+                    fid_metric_data['device'] = self.device
+                    self.metric_results['fid'] = calculate_metric(fid_metric_data, self.opt['val']['metrics']['fid']) * (idx + 1)
+                for metric in self.metric_results.keys():
+                    self.metric_results[metric] /= (idx + 1)
+                    # update the best metric result
+                    self._update_best_metric_result(dataset_name, metric, self.metric_results[metric], current_iter)
 
-        if with_metrics:
-            for metric in self.metric_results.keys():
-                self.metric_results[metric] /= (idx + 1)
-                # update the best metric result
-                self._update_best_metric_result(dataset_name, metric, self.metric_results[metric], current_iter)
-
-            self._log_validation_metric_values(current_iter, dataset_name, tb_logger)
+                self._log_validation_metric_values(current_iter, dataset_name, tb_logger)
 
     def _log_validation_metric_values(self, current_iter, dataset_name, tb_logger):
         log_str = f'Validation {dataset_name}\n'
