@@ -49,7 +49,7 @@ def make_exp_dirs(opt):
             os.makedirs(path, exist_ok=True)
 
 
-def scandir(dir_path, suffix=None, recursive=False, full_path=False):
+def scandir(dir_path, suffix=None, recursive=True, full_path=False):
     """Scan a directory to find the interested files.
 
     Args:
