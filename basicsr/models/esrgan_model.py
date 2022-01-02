@@ -3,6 +3,7 @@ from collections import OrderedDict
 
 from basicsr.utils.registry import MODEL_REGISTRY
 from .srgan_model import SRGANModel
+from basicsr.losses import r1_penalty
 
 
 @MODEL_REGISTRY.register()
@@ -34,12 +35,9 @@ class ESRGANModel(SRGANModel):
                 if l_g_style is not None:
                     l_g_total += l_g_style
                     loss_dict['l_g_style'] = l_g_style
-            # gan loss (relativistic gan)
-            real_d_pred = self.net_d(self.gt).detach()
+            # gan loss
             fake_g_pred = self.net_d(self.output)
-            l_g_real = self.cri_gan(real_d_pred - torch.mean(fake_g_pred), False, is_disc=False)
-            l_g_fake = self.cri_gan(fake_g_pred - torch.mean(real_d_pred), True, is_disc=False)
-            l_g_gan = (l_g_real + l_g_fake) / 2
+            l_g_gan = self.cri_gan(fake_g_pred, True, is_disc=False)
 
             l_g_total += l_g_gan
             loss_dict['l_g_gan'] = l_g_gan
@@ -62,13 +60,25 @@ class ESRGANModel(SRGANModel):
         # tensor for calculating mean.
 
         # real
-        fake_d_pred = self.net_d(self.output).detach()
+        if self.r1_penalty_coef > 0.0:
+            self.gt.requires_grad = True
         real_d_pred = self.net_d(self.gt)
-        l_d_real = self.cri_gan(real_d_pred - torch.mean(fake_d_pred), True, is_disc=True) * 0.5
+        if self.r1_penalty_coef > 0.0:
+            l_d_r1 = r1_penalty(real_d_pred, self.gt)
+            l_d_r1 = ((self.r1_penalty_coef / 2) * l_d_r1 + 0 * real_d_pred[0])
+            # TODO: why do we need to add 0 * real_pred, otherwise, a runtime
+            # error will arise: RuntimeError: Expected to have finished
+            # reduction in the prior iteration before starting a new one.
+            # This error indicates that your module has parameters that were
+            # not used in producing loss.
+            loss_dict['l_d_r1'] = l_d_r1.detach().mean()
+        else:
+            l_d_r1 = 0
+        l_d_real = self.cri_gan(real_d_pred, True, is_disc=True) + l_d_r1
         l_d_real.backward()
         # fake
         fake_d_pred = self.net_d(self.output.detach())
-        l_d_fake = self.cri_gan(fake_d_pred - torch.mean(real_d_pred.detach()), False, is_disc=True) * 0.5
+        l_d_fake = self.cri_gan(fake_d_pred, False, is_disc=True)
         l_d_fake.backward()
         self.optimizer_d.step()
 

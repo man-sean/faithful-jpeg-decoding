@@ -2,7 +2,7 @@ import torch
 from collections import OrderedDict
 
 from basicsr.archs import build_network
-from basicsr.losses import build_loss
+from basicsr.losses import build_loss, r1_penalty
 from basicsr.utils import get_root_logger
 from basicsr.utils.registry import MODEL_REGISTRY
 from .sr_model import SRModel
@@ -14,6 +14,8 @@ class SRGANModel(SRModel):
 
     def init_training_settings(self):
         train_opt = self.opt['train']
+
+        self.r1_penalty_coef = train_opt.get('r1_penalty_coef', 0.0)
 
         self.ema_decay = train_opt.get('ema_decay', 0)
         if self.ema_decay > 0:
@@ -128,6 +130,20 @@ class SRGANModel(SRModel):
         loss_dict['l_d_fake'] = l_d_fake
         loss_dict['out_d_fake'] = torch.mean(fake_d_pred.detach())
         l_d_fake.backward()
+
+        if self.r1_penalty_coef > 0.0:
+            self.gt.requires_grad = True
+            real_pred = self.net_d(self.gt)
+            l_d_r1 = r1_penalty(real_pred, self.gt)
+            l_d_r1 = (self.r1_penalty_coef / 2 * l_d_r1 * self.net_d_reg_every + 0 * real_pred[0])
+            # TODO: why do we need to add 0 * real_pred, otherwise, a runtime
+            # error will arise: RuntimeError: Expected to have finished
+            # reduction in the prior iteration before starting a new one.
+            # This error indicates that your module has parameters that were
+            # not used in producing loss.
+            loss_dict['l_d_r1'] = l_d_r1.detach().mean()
+            l_d_r1.backward()
+
         self.optimizer_d.step()
 
         self.log_dict = self.reduce_loss_dict(loss_dict)
