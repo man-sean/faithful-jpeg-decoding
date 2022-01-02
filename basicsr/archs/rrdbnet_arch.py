@@ -6,6 +6,17 @@ from basicsr.utils.registry import ARCH_REGISTRY
 from .arch_util import default_init_weights, make_layer, pixel_unshuffle
 
 
+class NoiseInjectionCat(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(1, 1, 1, 1))
+
+    def forward(self, x, noise_std=1.0):
+        batch, _, height, width = x.shape
+        noise = x.new_empty(batch, 1, height, width).normal_() * noise_std
+        return torch.cat((x, self.weight * noise), dim=1)
+
+
 class ResidualDenseBlock(nn.Module):
     """Residual Dense Block.
 
@@ -16,25 +27,39 @@ class ResidualDenseBlock(nn.Module):
         num_grow_ch (int): Channels for each growth.
     """
 
-    def __init__(self, num_feat=64, num_grow_ch=32):
+    def __init__(self, num_feat=64, num_grow_ch=32, noise_injection=False):
         super(ResidualDenseBlock, self).__init__()
-        self.conv1 = nn.Conv2d(num_feat, num_grow_ch, 3, 1, 1)
-        self.conv2 = nn.Conv2d(num_feat + num_grow_ch, num_grow_ch, 3, 1, 1)
-        self.conv3 = nn.Conv2d(num_feat + 2 * num_grow_ch, num_grow_ch, 3, 1, 1)
-        self.conv4 = nn.Conv2d(num_feat + 3 * num_grow_ch, num_grow_ch, 3, 1, 1)
-        self.conv5 = nn.Conv2d(num_feat + 4 * num_grow_ch, num_feat, 3, 1, 1)
+        add_ch = 1 if noise_injection else 0
+        self.conv1 = nn.Conv2d(add_ch + num_feat, num_grow_ch, 3, 1, 1)
+        self.conv2 = nn.Conv2d(add_ch + num_feat + num_grow_ch, num_grow_ch, 3, 1, 1)
+        self.conv3 = nn.Conv2d(add_ch + num_feat + 2 * num_grow_ch, num_grow_ch, 3, 1, 1)
+        self.conv4 = nn.Conv2d(add_ch + num_feat + 3 * num_grow_ch, num_grow_ch, 3, 1, 1)
+        self.conv5 = nn.Conv2d(add_ch + num_feat + 4 * num_grow_ch, num_feat, 3, 1, 1)
 
         self.lrelu = nn.LeakyReLU(negative_slope=0.2, inplace=True)
+
+        if noise_injection:
+            self.ni_1 = NoiseInjectionCat()
+            self.ni_2 = NoiseInjectionCat()
+            self.ni_3 = NoiseInjectionCat()
+            self.ni_4 = NoiseInjectionCat()
+            self.ni_5 = NoiseInjectionCat()
+        else:
+            self.ni_1 = nn.Identity()
+            self.ni_2 = nn.Identity()
+            self.ni_3 = nn.Identity()
+            self.ni_4 = nn.Identity()
+            self.ni_5 = nn.Identity()
 
         # initialization
         default_init_weights([self.conv1, self.conv2, self.conv3, self.conv4, self.conv5], 0.1)
 
     def forward(self, x):
-        x1 = self.lrelu(self.conv1(x))
-        x2 = self.lrelu(self.conv2(torch.cat((x, x1), 1)))
-        x3 = self.lrelu(self.conv3(torch.cat((x, x1, x2), 1)))
-        x4 = self.lrelu(self.conv4(torch.cat((x, x1, x2, x3), 1)))
-        x5 = self.conv5(torch.cat((x, x1, x2, x3, x4), 1))
+        x1 = self.lrelu(self.conv1(self.ni_1(x)))
+        x2 = self.lrelu(self.conv2(self.ni_2(torch.cat((x, x1), 1))))
+        x3 = self.lrelu(self.conv3(self.ni_3(torch.cat((x, x1, x2), 1))))
+        x4 = self.lrelu(self.conv4(self.ni_4(torch.cat((x, x1, x2, x3), 1))))
+        x5 = self.conv5(self.ni_5(torch.cat((x, x1, x2, x3, x4), 1)))
         # Emperically, we use 0.2 to scale the residual for better performance
         return x5 * 0.2 + x
 
@@ -49,11 +74,11 @@ class RRDB(nn.Module):
         num_grow_ch (int): Channels for each growth.
     """
 
-    def __init__(self, num_feat, num_grow_ch=32):
+    def __init__(self, num_feat, num_grow_ch=32, noise_injection=False):
         super(RRDB, self).__init__()
-        self.rdb1 = ResidualDenseBlock(num_feat, num_grow_ch)
-        self.rdb2 = ResidualDenseBlock(num_feat, num_grow_ch)
-        self.rdb3 = ResidualDenseBlock(num_feat, num_grow_ch)
+        self.rdb1 = ResidualDenseBlock(num_feat, num_grow_ch, noise_injection)
+        self.rdb2 = ResidualDenseBlock(num_feat, num_grow_ch, noise_injection)
+        self.rdb3 = ResidualDenseBlock(num_feat, num_grow_ch, noise_injection)
 
     def forward(self, x):
         out = self.rdb1(x)
@@ -84,7 +109,7 @@ class RRDBNet(nn.Module):
         num_grow_ch (int): Channels for each growth. Default: 32.
     """
 
-    def __init__(self, num_in_ch, num_out_ch, scale=4, num_feat=64, num_block=23, num_grow_ch=32):
+    def __init__(self, num_in_ch, num_out_ch, scale=4, num_feat=64, num_block=23, num_grow_ch=32, noise_injection=False):
         super(RRDBNet, self).__init__()
         self.scale = scale
         if scale == 2:
@@ -92,7 +117,7 @@ class RRDBNet(nn.Module):
         elif scale == 1:
             num_in_ch = num_in_ch * 16
         self.conv_first = nn.Conv2d(num_in_ch, num_feat, 3, 1, 1)
-        self.body = make_layer(RRDB, num_block, num_feat=num_feat, num_grow_ch=num_grow_ch)
+        self.body = make_layer(RRDB, num_block, num_feat=num_feat, num_grow_ch=num_grow_ch, noise_injection=noise_injection)
         self.conv_body = nn.Conv2d(num_feat, num_feat, 3, 1, 1)
         # upsample
         self.conv_up1 = nn.Conv2d(num_feat, num_feat, 3, 1, 1)
