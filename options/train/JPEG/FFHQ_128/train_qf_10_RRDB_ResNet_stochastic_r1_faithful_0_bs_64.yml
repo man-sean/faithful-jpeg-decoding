@@ -1,6 +1,6 @@
 # general settings
-name: ESRGAN_x1_r1_penalty_deterministic_FFHQ
-model_type: ESRGANModel #JPEGModel
+name: ESRGAN_x1_qf_10_r1_penalty_stochastic_faithful_0_BS_64_FFHQ
+model_type: ESRGANModel
 scale: 1
 num_gpu: 1  # set num_gpu: 0 for cpu mode
 manual_seed: 0
@@ -10,7 +10,7 @@ datasets:
   train:
     name: FFHQ
     type: JPEGDataset
-    dataroot_gt: /home/sean.man/datasets/ffhq_64/train/dummy
+    dataroot_gt: /home/sean.man/datasets/ffhq_128/train/dummy
     # (for lmdb)
     # dataroot_gt: datasets/DIV2K/DIV2K_train_HR_sub.lmdb
     # dataroot_lq: datasets/DIV2K/DIV2K_train_LR_bicubic_X4_sub.lmdb
@@ -20,7 +20,7 @@ datasets:
       # (for lmdb)
       # type: lmdb
 
-    gt_size: 64
+    gt_size: 128
     use_hflip: true
     use_rot: false
     qf: 10
@@ -28,17 +28,16 @@ datasets:
     # data loader
     use_shuffle: true
     num_worker_per_gpu: 10
-    batch_size_per_gpu: 16 #32
+    batch_size_per_gpu: 64 #32
     dataset_enlarge_ratio: 100
     prefetch_mode: ~
 
   val:
     name: FFHQ
     type: JPEGDataset
-    dataroot_gt: /home/sean.man/datasets/ffhq_64/val/dummy
+    dataroot_gt: /home/sean.man/datasets/ffhq_128/val/dummy
     io_backend:
       type: disk
-#    gt_size: 64
     qf: 10
 
 # network structures
@@ -53,7 +52,7 @@ network_g:
 
 network_d:
   type: ResNetGANStabilityDiscriminator
-  size: 64
+  size: 128
 
 # path
 path:
@@ -67,29 +66,30 @@ train:
   ema_decay: 0.999
   optim_g:
     type: Adam
-    lr: !!float 1e-4
+    lr: !!float 2e-4
     weight_decay: 0
     betas: [0., 0.99]
   optim_d:
     type: Adam
-    lr: !!float 1e-4
+    lr: !!float 2e-4
     weight_decay: 0
     betas: [0., 0.99]
 
   scheduler:
     type: MultiStepLR
-    milestones: [100000, 200000, 300000, 350000]
+    milestones: [50000, 100000, 150000, 175000]
+#    milestones: [100000, 200000, 300000, 350000]
     gamma: 0.5
 
-  total_iter: 400000
+  total_iter: 200000 #400000
   warmup_iter: -1  # no warm up
 
   # losses
-#  pixel_opt:
-#    type: JPEGFaithfulnessLoss
-#    loss_weight: 0.0
-#    loss_type: 'mse'
-#    reduction: mean
+  pixel_opt:
+    type: JPEGFaithfulnessLoss
+    loss_weight: 0.0
+    loss_type: 'mse'
+    reduction: mean
   gan_opt:
     type: GANLoss
     gan_type: wgan_softplus
@@ -100,7 +100,7 @@ train:
 
 # validation settings
 val:
-  val_freq: !!float 1e2 #5e3
+  val_freq: !!float 5e3
   save_img: true
   save_lq_img: true
 
@@ -114,13 +114,13 @@ val:
       crop_border: 0
       qf: 10
       test_y_channel: false
-#    fid:
-#      type: calculate_fid_given_paths
-#      gt_path: /home/sean.man/datasets/ffhq_64/train/dummy
-#      dims: 2048
-#      num_workers: 10
-#      batch_size: 64
-#      better: lower  # the lower, the better
+    fid:
+      type: calculate_fid_given_paths
+      gt_path: /home/sean.man/datasets/ffhq_128/train/dummy
+      dims: 2048
+      num_workers: 10
+      batch_size: 64
+      better: lower  # the lower, the better
 
 # logging settings
 logger:
@@ -129,7 +129,7 @@ logger:
   use_tb_logger: true
   wandb:
     project: jpeg
-    group: ffhq_testing
+    group: ffhq128_stochastic
     resume_id: ~
 
 # dist training settings
