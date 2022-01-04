@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+from copy import deepcopy
 
 # ------------------------ utils ------------------------#
 y_table = np.array(
@@ -16,11 +17,11 @@ y_table = np.array(
      [14, 17, 22, 29, 51, 87, 80, 62], [18, 22, 37, 56, 68, 109, 103, 77], [24, 35, 55, 64, 81, 104, 113, 92],
      [49, 64, 78, 87, 103, 121, 120, 101], [72, 92, 95, 98, 112, 100, 103, 99]],
     dtype=np.float32).T
-y_table = nn.Parameter(torch.from_numpy(y_table))
+y_table = nn.Parameter(torch.from_numpy(y_table))#, requires_grad=False)
 c_table = np.empty((8, 8), dtype=np.float32)
 c_table.fill(99)
 c_table[:4, :4] = np.array([[17, 18, 24, 47], [18, 21, 26, 66], [24, 26, 56, 99], [47, 66, 99, 99]]).T
-c_table = nn.Parameter(torch.from_numpy(c_table))
+c_table = nn.Parameter(torch.from_numpy(c_table))#, requires_grad=False)
 
 
 def diff_round(x):
@@ -155,7 +156,7 @@ class YQuantize(nn.Module):
     def __init__(self, rounding):
         super(YQuantize, self).__init__()
         self.rounding = rounding
-        self.y_table = y_table
+        self.y_table = deepcopy(y_table)
 
     def forward(self, image, factor=1):
         """
@@ -185,7 +186,7 @@ class CQuantize(nn.Module):
     def __init__(self, rounding):
         super(CQuantize, self).__init__()
         self.rounding = rounding
-        self.c_table = c_table
+        self.c_table = deepcopy(c_table)
 
     def forward(self, image, factor=1):
         """
@@ -250,7 +251,7 @@ class YDequantize(nn.Module):
 
     def __init__(self):
         super(YDequantize, self).__init__()
-        self.y_table = y_table
+        self.y_table = deepcopy(y_table)
 
     def forward(self, image, factor=1):
         """
@@ -275,7 +276,7 @@ class CDequantize(nn.Module):
 
     def __init__(self):
         super(CDequantize, self).__init__()
-        self.c_table = c_table
+        self.c_table = deepcopy(c_table)
 
     def forward(self, image, factor=1):
         """
@@ -470,7 +471,7 @@ class DiffJPEG(nn.Module):
             x (Tensor): Input image, bchw, rgb, [0, 1]
             quality(float): Quality factor for jpeg compression scheme.
         """
-        factor = quality
+        factor = deepcopy(quality)
         if isinstance(factor, (int, float)):
             factor = quality_to_factor(factor)
         else:
