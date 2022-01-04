@@ -1,12 +1,17 @@
 import math
+from copy import deepcopy
+
 import torch
 from torch import autograd as autograd
 from torch import nn as nn
 from torch.nn import functional as F
+from functools import partial
 
 from basicsr.archs.vgg_arch import VGGFeatureExtractor
 from basicsr.utils.registry import LOSS_REGISTRY
+from basicsr.utils.diffjpeg import DiffJPEG
 from .loss_util import weighted_loss
+from ..utils.matlab_imresize_differentiable import imresize
 
 _reduction_modes = ['none', 'mean', 'sum']
 
@@ -24,6 +29,89 @@ def mse_loss(pred, target):
 @weighted_loss
 def charbonnier_loss(pred, target, eps=1e-12):
     return torch.sqrt((pred - target)**2 + eps)
+
+
+@LOSS_REGISTRY.register()
+class JPEGFaithfulnessLoss(nn.Module):
+    """L1 (mean absolute error, MAE) loss for faithfulness.
+
+    Args:
+        loss_weight (float): Loss weight for L1 loss. Default: 1.0.
+        reduction (str): Specifies the reduction to apply to the output.
+            Supported choices are 'none' | 'mean' | 'sum'. Default: 'mean'.
+    """
+
+    def __init__(self, loss_weight=1.0, reduction='mean', loss_type='l1'):
+        super(JPEGFaithfulnessLoss, self).__init__()
+        if reduction not in ['none', 'mean', 'sum']:
+            raise ValueError(f'Unsupported reduction mode: {reduction}. Supported ones are: {_reduction_modes}')
+
+        self.loss_weight = loss_weight
+        self.reduction = reduction
+        if loss_type == 'l1':
+            self.loss = l1_loss
+        elif loss_type == 'mse':
+            self.loss = mse_loss
+        else:
+            raise NotImplementedError()
+
+        self.jpeger = DiffJPEG(differentiable=True)
+
+    def forward(self, pred, target, qf, weight=None, **kwargs):
+        """
+        Args:
+            pred (Tensor): of shape (N, C, H, W). Predicted tensor.
+            target (Tensor): of shape (N, C, H, W). Ground truth tensor.
+            weight (Tensor, optional): of shape (N, C, H, W). Element-wise weights. Default: None.
+        """
+        pred = self.jpeger(pred, quality=deepcopy(qf))
+        target = self.jpeger(target, quality=deepcopy(qf))
+        return self.loss_weight * self.loss(pred, target, weight, reduction=self.reduction)
+
+
+@LOSS_REGISTRY.register()
+class SRFaithfulnessLoss(nn.Module):
+    """L1 (mean absolute error, MAE) loss for faithfulness.
+
+    Args:
+        loss_weight (float): Loss weight for L1 loss. Default: 1.0.
+        reduction (str): Specifies the reduction to apply to the output.
+            Supported choices are 'none' | 'mean' | 'sum'. Default: 'mean'.
+    """
+
+    def __init__(self, loss_weight=1.0, reduction='mean', scale_factor=4,
+                 loss_type='l1', imresize_backend='matlab', imresize_type='cubic'):
+        super(SRFaithfulnessLoss, self).__init__()
+        if reduction not in ['none', 'mean', 'sum']:
+            raise ValueError(f'Unsupported reduction mode: {reduction}. Supported ones are: {_reduction_modes}')
+
+        self.loss_weight = loss_weight
+        self.reduction = reduction
+        self.scale_factor = scale_factor
+        if loss_type == 'l1':
+            self.loss = l1_loss
+        elif loss_type == 'mse':
+            self.loss = mse_loss
+        else:
+            raise NotImplementedError()
+
+        if imresize_backend == 'matlab':
+            if imresize_type != 'cubic':
+                raise NotImplementedError()
+            self.imresize = partial(imresize, scale=1.0 / self.scale_factor)
+        elif imresize_backend == 'torch':
+            self.imresize = partial(F.interpolate, mode=imresize_type, scale_factor=1.0 / self.scale_factor)
+
+    def forward(self, pred, target, weight=None, **kwargs):
+        """
+        Args:
+            pred (Tensor): of shape (N, C, H, W). Predicted tensor.
+            target (Tensor): of shape (N, C, H, W). Ground truth tensor.
+            weight (Tensor, optional): of shape (N, C, H, W). Element-wise weights. Default: None.
+        """
+        return self.loss_weight * self.loss(self.imresize(pred),
+                                            self.imresize(target),
+                                            weight, reduction=self.reduction)
 
 
 @LOSS_REGISTRY.register()
