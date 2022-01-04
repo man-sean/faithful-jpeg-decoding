@@ -95,6 +95,7 @@ def train_pipeline(root_path):
 
     torch.backends.cudnn.benchmark = True
     # torch.backends.cudnn.deterministic = True
+    # torch.autograd.set_detect_anomaly(True)
 
     # load resume states if necessary
     resume_state = load_resume_state(opt)
@@ -190,7 +191,8 @@ def train_pipeline(root_path):
                 if len(val_loaders) > 1:
                     logger.warning('Multiple validation datasets are *only* supported by SRModel.')
                 for val_loader in val_loaders:
-                    model.validation(val_loader, current_iter, tb_logger, opt['val']['save_img'])
+                    model.validation(val_loader, current_iter, tb_logger, opt['val']['save_img'],
+                                     save_lq_img=opt['val']['save_lq_img'] if 'save_lq_img' in opt['val'] else False)
 
             data_timer.start()
             iter_timer.start()
@@ -205,7 +207,8 @@ def train_pipeline(root_path):
     model.save(epoch=-1, current_iter=-1)  # -1 stands for the latest
     if opt.get('val') is not None:
         for val_loader in val_loaders:
-            model.validation(val_loader, current_iter, tb_logger, opt['val']['save_img'])
+            model.validation(val_loader, current_iter, tb_logger, opt['val']['save_img'],
+                             save_lq_img=opt['val']['save_lq_img'] if 'save_lq_img' in opt['val'] else False)
     if tb_logger:
         tb_logger.close()
 
