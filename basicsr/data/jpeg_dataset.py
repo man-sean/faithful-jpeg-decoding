@@ -8,6 +8,7 @@ from basicsr.data.degradations import add_jpg_compression
 from basicsr.data.transforms import augment, mod_crop, paired_random_crop
 from basicsr.utils import FileClient, imfrombytes, img2tensor, scandir
 from basicsr.utils.registry import DATASET_REGISTRY
+from basicsr.utils.diffjpeg import DiffJPEG
 
 
 @DATASET_REGISTRY.register()
@@ -44,6 +45,8 @@ class JPEGDataset(data.Dataset):
         # https://github.com/xinntao/BasicSR/blob/master/basicsr/data/
         self.paths = [os.path.join(self.gt_folder, v) for v in list(scandir(self.gt_folder))]
 
+        self.jpeger = DiffJPEG(differentiable=True)
+
     def __getitem__(self, index):
         if self.file_client is None:
             self.file_client = FileClient(self.io_backend_opt.pop('type'), **self.io_backend_opt)
@@ -57,16 +60,10 @@ class JPEGDataset(data.Dataset):
         img_gt = imfrombytes(img_bytes, float32=True)
         img_gt = mod_crop(img_gt, scale)
 
-        # resize if needed
-        if self.opt['gt_resize']:
-            img_gt = cv2.resize(img_gt, (self.opt['gt_size'], self.opt['gt_size']), interpolation=cv2.INTER_CUBIC)
-
         # generate lq image
         # downsample
         h, w = img_gt.shape[0:2]
         img_lq = cv2.resize(img_gt, (w // scale, h // scale), interpolation=cv2.INTER_CUBIC)
-        # add JPEG compression
-        img_lq = add_jpg_compression(img_lq, quality=self.opt['qf'])
 
         # augmentation for training
         if self.opt['phase'] == 'train':
@@ -81,12 +78,22 @@ class JPEGDataset(data.Dataset):
 
         img_lq = torch.clamp((img_lq * 255.0).round(), 0, 255) / 255.
 
+        # generate lq image
+        # downsample
+        # add JPEG compression
+        img_lq = self.jpeger(img_lq.unsqueeze(0), quality=self.opt['qf']).squeeze(0).detach()
+
         # normalize
         if self.mean is not None or self.std is not None:
             normalize(img_lq, self.mean, self.std, inplace=True)
             normalize(img_gt, self.mean, self.std, inplace=True)
 
-        return {'lq': img_lq, 'gt': img_gt, 'lq_path': gt_path, 'gt_path': gt_path}
+        return {'lq': img_lq,
+                'gt': img_gt,
+                'lq_path': gt_path,
+                'gt_path': gt_path,
+                'qf': self.opt['qf'],
+                }
 
     def __len__(self):
         return len(self.paths)
