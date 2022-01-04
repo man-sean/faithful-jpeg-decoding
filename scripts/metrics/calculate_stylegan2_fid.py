@@ -5,7 +5,7 @@ import torch
 from torch import nn
 
 from basicsr.archs.stylegan2_arch import StyleGAN2Generator
-from basicsr.metrics.fid import calculate_fid, extract_inception_features, load_patched_inception_v3
+from basicsr.metrics.fid_basicsr import calculate_fid, extract_inception_features, load_patched_inception_v3
 
 
 def calculate_stylegan2_fid():

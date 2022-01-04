@@ -5,7 +5,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from basicsr.data import build_dataset
-from basicsr.metrics.fid import calculate_fid, extract_inception_features, load_patched_inception_v3
+from basicsr.metrics.fid_basicsr import calculate_fid, extract_inception_features, load_patched_inception_v3
 
 
 def calculate_fid_folder():
