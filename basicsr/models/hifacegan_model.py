@@ -191,7 +191,8 @@ class HiFaceGANModel(SRModel):
         if self.ema_decay > 0:
             print('HiFaceGAN does not support EMA now. pass')
 
-    def validation(self, dataloader, current_iter, tb_logger, save_img=False):
+    def validation(self, dataloader, current_iter, tb_logger, save_img=False,
+                   save_lq_img=False):
         """
         Warning: HiFaceGAN requires train() mode even for validation
         For more info, see https://github.com/Lotayou/Face-Renovation/issues/31
@@ -207,11 +208,11 @@ class HiFaceGANModel(SRModel):
             self.net_g.train()
 
         if self.opt['dist']:
-            self.dist_validation(dataloader, current_iter, tb_logger, save_img)
+            self.dist_validation(dataloader, current_iter, tb_logger, save_img, save_lq_img)
         else:
             print('In HiFaceGANModel: The new metrics package is under development.' +
                   'Using super method now (Only PSNR & SSIM are supported)')
-            super().nondist_validation(dataloader, current_iter, tb_logger, save_img)
+            super().nondist_validation(dataloader, current_iter, tb_logger, save_img, save_lq_img)
 
     def nondist_validation(self, dataloader, current_iter, tb_logger, save_img):
         """

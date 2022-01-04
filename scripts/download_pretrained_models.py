@@ -102,6 +102,16 @@ if __name__ == '__main__':
             'IconVSR_REDS-aaa5367f.pth': '1b8ir754uIAFUSJ8YW_cmPzqer19AR7Hz',
             'IconVSR_Vimeo90K_BDx4-cfcb7e00.pth': '13lp55s-YTd-fApx8tTy24bbHsNIGXdAH',
             'IconVSR_Vimeo90K_BIx4-35fec07c.pth': '1lWUB36ERjFbAspr-8UsopJ6xwOuWjh2g'
+        },
+        'SRGAN': {
+            '001_MSRResNet_x4_f64b16_DIV2K_1000k_B16G1_wandb.pth': '14nQ-Xah5wRQ9xVPcB6OdYX4ZixkaSv6R',
+            '004_MSRGAN_x4_f64b16_DIV2K_400k_B16G1_wandb.pth': '1Wxm_vj1QphkK4jfI7Dh3hrVqxKFpICLB'
+        },
+        'ExplorableSR': {
+            'Explorable_SR_G.pth': '1UmF0Dy_c97CMiyMFG16goJxzXXwpQOUG'
+        },
+        'ciplab': {
+            'ciplab.pth': '1ugIYMCQK-Rw5jyI6CBB3e9ukMCceb7Lm'
         }
     }
 
