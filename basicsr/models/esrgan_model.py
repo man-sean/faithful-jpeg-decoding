@@ -10,6 +10,12 @@ from basicsr.losses import r1_penalty
 class ESRGANModel(SRGANModel):
     """ESRGAN model for single image super-resolution."""
 
+    def feed_data(self, data):
+        # add support for jpeg qf
+        super(ESRGANModel, self).feed_data(data=data)
+        if 'qf' in data:
+            self.qf = data['qf'].to(self.device)
+
     def optimize_parameters(self, current_iter):
         # optimize net_g
         for p in self.net_d.parameters():
@@ -23,7 +29,7 @@ class ESRGANModel(SRGANModel):
         if (current_iter % self.net_d_iters == 0 and current_iter > self.net_d_init_iters):
             # pixel loss
             if self.cri_pix:
-                l_g_pix = self.cri_pix(self.output, self.gt)
+                l_g_pix = self.cri_pix(self.output, self.gt, qf=self.qf)
                 l_g_total += l_g_pix
                 loss_dict['l_g_pix'] = l_g_pix
             # perceptual loss
