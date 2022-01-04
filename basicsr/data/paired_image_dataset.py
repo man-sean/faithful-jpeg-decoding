@@ -1,3 +1,4 @@
+import numpy as np
 from torch.utils import data as data
 from torchvision.transforms.functional import normalize
 
@@ -6,6 +7,7 @@ from basicsr.data.transforms import augment, paired_random_crop
 from basicsr.utils import FileClient, imfrombytes, img2tensor
 from basicsr.utils.matlab_functions import rgb2ycbcr
 from basicsr.utils.registry import DATASET_REGISTRY
+from basicsr.data.degradations import add_gaussian_noise
 
 
 @DATASET_REGISTRY.register()
@@ -46,6 +48,7 @@ class PairedImageDataset(data.Dataset):
         self.io_backend_opt = opt['io_backend']
         self.mean = opt['mean'] if 'mean' in opt else None
         self.std = opt['std'] if 'std' in opt else None
+        self.noise_std = opt['noise_std'] if 'noise_std' in opt else None
 
         self.gt_folder, self.lq_folder = opt['dataroot_gt'], opt['dataroot_lq']
         if 'filename_tmpl' in opt:
@@ -71,12 +74,17 @@ class PairedImageDataset(data.Dataset):
 
         # Load gt and lq images. Dimension order: HWC; channel order: BGR;
         # image range: [0, 1], float32.
+        color = 'grayscale' if self.opt and 'color' in self.opt and self.opt['color'] == 'grayscale' else 'color'
         gt_path = self.paths[index]['gt_path']
         img_bytes = self.file_client.get(gt_path, 'gt')
-        img_gt = imfrombytes(img_bytes, float32=True)
+        img_gt = imfrombytes(img_bytes, flag=color, float32=True)
         lq_path = self.paths[index]['lq_path']
         img_bytes = self.file_client.get(lq_path, 'lq')
-        img_lq = imfrombytes(img_bytes, float32=True)
+        img_lq = imfrombytes(img_bytes, flag=color, float32=True)
+
+        if color == 'grayscale':
+            img_gt = np.expand_dims(img_gt, 2)
+            img_lq = np.expand_dims(img_lq, 2)
 
         # augmentation for training
         if self.opt['phase'] == 'train':
@@ -96,6 +104,8 @@ class PairedImageDataset(data.Dataset):
         if self.opt['phase'] != 'train':
             img_gt = img_gt[0:img_lq.shape[0] * scale, 0:img_lq.shape[1] * scale, :]
 
+        if self.noise_std is not None:
+            img_lq = add_gaussian_noise(img_lq, self.noise_std)
         # BGR to RGB, HWC to CHW, numpy to tensor
         img_gt, img_lq = img2tensor([img_gt, img_lq], bgr2rgb=True, float32=True)
         # normalize
