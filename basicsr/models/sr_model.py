@@ -1,6 +1,7 @@
 import torch
 from collections import OrderedDict
 from os import path as osp
+
 from tqdm import tqdm
 from basicsr.utils.matlab_functions import imresize
 from basicsr.archs import build_network
@@ -8,10 +9,13 @@ from basicsr.losses import build_loss
 from basicsr.metrics import calculate_metric
 from basicsr.utils import get_root_logger, imwrite, tensor2img
 from basicsr.utils.registry import MODEL_REGISTRY
+from basicsr.utils.diffjpeg import DiffJPEG
 from .base_model import BaseModel
 import numpy as np
 import tempfile
 from torch.nn.functional import interpolate
+
+from ..utils.collage_util import log_collage
 
 
 @MODEL_REGISTRY.register()
@@ -138,6 +142,7 @@ class SRModel(BaseModel):
 
     def nondist_validation(self, dataloader, current_iter, tb_logger, save_img, save_lq_img):
         dataset_name = dataloader.dataset.opt['name']
+        qf = dataloader.dataset.opt['qf']
         with_metrics = self.opt['val'].get('metrics') is not None
         use_pbar = self.opt['val'].get('pbar', False)
 
@@ -154,7 +159,10 @@ class SRModel(BaseModel):
         if use_pbar:
             pbar = tqdm(total=len(dataloader), unit='image')
 
+        log_collage(dataloader=dataloader, model=self, global_step=current_iter)
+
         with tempfile.TemporaryDirectory() as tmpdirname:
+            jpeger = DiffJPEG(differentiable=True)
             for idx, val_data in enumerate(dataloader):
                 img_name = osp.splitext(osp.basename(val_data['lq_path'][0]))[0]
                 self.feed_data(val_data)
@@ -192,11 +200,12 @@ class SRModel(BaseModel):
                     imwrite(sr_img, save_img_path + '.png')
                     if save_lq_img:
                         imwrite(metric_data['gt_lq'], save_img_path + '_gt_lq.png')
-                        sr_lq = interpolate(sr_img_tensor, scale_factor=1.0 / self.opt['scale'], mode='nearest')
-                        sr_lq = tensor2img(sr_lq.squeeze(0))
+                        # sr_lq = interpolate(sr_img_tensor, scale_factor=1.0 / self.opt['scale'], mode='nearest')
+                        fake_lq = jpeger(sr_img_tensor, quality=qf)
+                        fake_lq = tensor2img(fake_lq.squeeze(0))
                         # sr_lq = imresize(sr_img, 1.0 / self.opt['scale'], antialiasing=True)
-                        imwrite(sr_lq, save_img_path + '_sr_lq.png')
-                        lq_diff = sr_lq - metric_data['gt_lq']
+                        imwrite(fake_lq, save_img_path + '_fake_lq.png')
+                        lq_diff = fake_lq - metric_data['gt_lq']
                         min = np.min(lq_diff)
                         max = np.max(lq_diff)
                         lq_diff -= min
