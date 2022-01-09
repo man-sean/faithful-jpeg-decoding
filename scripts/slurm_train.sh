@@ -26,4 +26,4 @@ GLOG_vmodule=MemcachedClient=-1 \
 #CUDA_LAUNCH_BLOCKING=1 \ # for debugging
 #[ "$DEBUG_CUDA" == "ON" ] && CUDA_LAUNCH_BLOCKING=1 \ || CUDA_LAUNCH_BLOCKING=0 \
 srun -p cactus -A cactus --mpi=pmi2 --job-name=JPEG --gres=gpu:$GPUS --ntasks=1 --ntasks-per-node=1 --cpus-per-task=$CPUS --kill-on-bad-exit=1 \
-python -u basicsr/train.py -opt $CONFIG #--launcher="slurm"
+python -u basicsr/train.py -opt $CONFIG ${@:4} #--launcher="slurm"
