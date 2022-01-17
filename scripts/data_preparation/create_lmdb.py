@@ -5,6 +5,37 @@ from basicsr.utils import scandir
 from basicsr.utils.lmdb_util import make_lmdb_from_imgs
 
 
+def create_lmdb_for_imagenet():
+    """Create lmdb files for ImageNet dataset.
+
+    Usage:
+        Before run this script, please run `extract_subimages.py`.
+        Remember to modify opt configurations according to your settings.
+    """
+    # HR images
+    folder_path = '/home/sean.man/datasets/imagenet_patch_128/train'
+    lmdb_path = '/home/sean.man/datasets/imagenet_patch_128/train.lmdb'
+    img_path_list, keys = prepare_keys_imagenet(folder_path)
+    make_lmdb_from_imgs(folder_path, lmdb_path, img_path_list, keys)
+
+
+def prepare_keys_imagenet(folder_path):
+    """Prepare image path list and keys for DIV2K dataset.
+
+    Args:
+        folder_path (str): Folder path.
+
+    Returns:
+        list[str]: Image path list.
+        list[str]: Key list.
+    """
+    print('Reading image path list ...')
+    img_path_list = sorted(list(scandir(folder_path, suffix='png', recursive=False)))
+    keys = [img_path.split('.png')[0] for img_path in sorted(img_path_list)]
+
+    return img_path_list, keys
+
+
 def create_lmdb_for_div2k():
     """Create lmdb files for DIV2K dataset.
 
@@ -156,9 +187,8 @@ if __name__ == '__main__':
 
     parser.add_argument(
         '--dataset',
-        type=str,
-        help=("Options: 'DIV2K', 'REDS', 'Vimeo90K' "
-              'You may need to modify the corresponding configurations in codes.'))
+        required=True,
+        choices=['div2k', 'reds', 'vimeo90k', 'imagenet'])
     args = parser.parse_args()
     dataset = args.dataset.lower()
     if dataset == 'div2k':
@@ -167,5 +197,7 @@ if __name__ == '__main__':
         create_lmdb_for_reds()
     elif dataset == 'vimeo90k':
         create_lmdb_for_vimeo90k()
+    elif dataset == 'imagenet':
+        create_lmdb_for_imagenet()
     else:
         raise ValueError('Wrong dataset.')
