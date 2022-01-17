@@ -91,35 +91,41 @@ def rgb_to_ycbcr(image: torch.Tensor) -> torch.Tensor:
     return torch.stack((y, cb, cr), -3)
 
 
-def log_collage(dataloader, model, global_step, size=10):
+def get_collage(batch, model, expansion, keep=1):
     def _to_numpy(x):
-        return np.transpose(x.detach().clamp_(0, 1).cpu().numpy(), (0, 2, 3, 1))
+        return np.einsum('...chw->...hwc', x.detach().clamp_(0, 1).cpu().numpy())
 
-    batch = get_batch(dataloader, size)
     jpeger = DiffJPEG(differentiable=True)
-    expansion = 32  # number of realizations for std computation
+
+    # expand batch
+    inputs = ["gt", "lq", "qf"]
+    xbatch = {k: expand_batch(v, expansion) for k, v in batch.items() if k in inputs}
 
     # generate fakes
-    model.feed_data(batch)
+    model.feed_data(xbatch)
     model.test()
     visuals = model.get_current_visuals()
-    real = visuals['gt']
-    compressed = visuals['lq']
-    fake = visuals['result']
-    recompressed = jpeger(fake, quality=batch['qf'])
+
+    # extract images
+    real = restore_expanded_batch(visuals['gt'], expansion)[:keep]
+    compressed = restore_expanded_batch(visuals['lq'], expansion)[:keep]
+    fake = restore_expanded_batch(visuals['result'], expansion)[:keep]
+    recompressed = restore_expanded_batch(jpeger(visuals['result'], quality=xbatch['qf']), expansion)[:keep]
     diff = (compressed - recompressed).abs()
 
+    # remove redundancies
+    real = real[:1].squeeze(0)
+    compressed = compressed[:1].squeeze(0)
+    fake = fake.squeeze(0)
+    recompressed = recompressed.squeeze(0)
+    diff = diff.squeeze(0)
+
     # generate std
-    inputs = ["gt", "lq", "qf"]
-    std_batch = {k: expand_batch(v, expansion) for k, v in batch.items() if k in inputs}
-    model.feed_data(std_batch)
-    model.test()
-    visuals = model.get_current_visuals()
     std_fake = visuals['result'].clamp(0, 1)
     std_fake = rgb_to_ycbcr(std_fake)[..., 0:1, :, :]
     std = restore_expanded_batch(std_fake, expansion).std(0).pow(1/4)
     caption = f'STD min: {std.min():.3}, max: {std.max():.3}'
-    std = std.expand_as(fake).clone()
+    std = std.expand_as(real).clone()
     std = 1 - _to_numpy(std)
 
     # convert to numpy
@@ -128,6 +134,14 @@ def log_collage(dataloader, model, global_step, size=10):
     fake = _to_numpy(fake)
     recompressed = _to_numpy(recompressed)
     diff = _to_numpy(diff)
+
+    return real, compressed, fake, recompressed, diff, std, caption
+
+
+def log_collage(dataloader, model, global_step, size=10, expansion=32):
+    batch = get_batch(dataloader, size)
+
+    real, compressed, fake, recompressed, diff, std, caption = get_collage(batch, model, expansion)
 
     wandb.log(
         {"collage": [wandb.Image(np.concatenate([r, c, f, rc, d, s], axis=1), caption=caption)

@@ -2,7 +2,7 @@ import torch
 from collections import OrderedDict
 from os import path as osp
 
-from tqdm import tqdm
+from tqdm import tqdm, trange
 from basicsr.utils.matlab_functions import imresize
 from basicsr.archs import build_network
 from basicsr.losses import build_loss
@@ -15,7 +15,7 @@ import numpy as np
 import tempfile
 from torch.nn.functional import interpolate
 
-from ..utils.collage_util import log_collage
+from ..utils.collage_util import log_collage, get_collage
 
 
 @MODEL_REGISTRY.register()
@@ -159,7 +159,8 @@ class SRModel(BaseModel):
         if use_pbar:
             pbar = tqdm(total=len(dataloader), unit='image')
 
-        log_collage(dataloader=dataloader, model=self, global_step=current_iter)
+        if self.opt['is_train']:
+            log_collage(dataloader=dataloader, model=self, global_step=current_iter)
 
         with tempfile.TemporaryDirectory() as tmpdirname:
             jpeger = DiffJPEG(differentiable=True)
@@ -265,3 +266,77 @@ class SRModel(BaseModel):
         else:
             self.save_network(self.net_g, 'net_g', current_iter)
         self.save_training_state(epoch, current_iter)
+
+    def test_fid(self, dataloader, repeat):
+        dataset_name = dataloader.dataset.opt['name']
+        fids = []
+
+        for _ in trange(repeat):
+            with tempfile.TemporaryDirectory() as tmpdirname:
+                for idx, val_data in enumerate(dataloader):
+                    self.feed_data(val_data)
+                    self.test()
+
+                    visuals = self.get_current_visuals()
+                    sr_img = tensor2img([visuals['result']])
+                    imwrite(sr_img, osp.join(tmpdirname, f'sr_{idx}.png'))
+
+                    if 'gt' in visuals:
+                        del self.gt
+
+                    # tentative for out of GPU memory
+                    del self.lq
+                    del self.output
+                    torch.cuda.empty_cache()
+
+                fid_metric_data = {}
+                fid_metric_data['fake_path'] = tmpdirname
+                fid_metric_data['device'] = self.device
+                fid_result = calculate_metric(fid_metric_data, self.opt['fid']['opt'])
+                fids.append(fid_result)
+
+        fids = np.array(fids)
+        fid_mean = fids.mean()
+        fid_std = fids.std()
+
+        logger = get_root_logger()
+        logger.info(f"FID for {dataset_name}, repeated {repeat} times: {fid_mean} ±{fid_std}")
+
+    def test_collage(self, dataloader):
+        def _rgb_to_bgr(img):
+            img = torch.from_numpy(img[0].transpose(2, 0, 1))
+            img = tensor2img(img)
+            return img
+
+        dataset_name = dataloader.dataset.opt['name']
+        idx_to_save = self.opt['collage'].get('idx_to_save', [])
+        realizations = self.opt['collage'].get('realizations', 5)
+
+        pbar = tqdm(total=len(idx_to_save), unit='image')
+
+        for idx, val_data in enumerate(dataloader):
+            if idx not in idx_to_save:
+                continue
+
+            img_name = osp.splitext(osp.basename(val_data['lq_path'][0]))[0]
+            path = osp.join(self.opt['path']['results_root'], 'collage', dataset_name, img_name)
+
+            real, compressed, fake, recompressed, diff, std, caption = get_collage(batch=val_data,
+                                                                                   model=self,
+                                                                                   expansion=32,
+                                                                                   keep=realizations,
+                                                                                   )
+
+            imwrite(_rgb_to_bgr(real), path + '_real.png')
+            imwrite(_rgb_to_bgr(compressed), path + '_compressed.png')
+            imwrite(_rgb_to_bgr(1 - std), path + '_std.png')
+            for r in range(realizations):
+                imwrite(_rgb_to_bgr(fake[r]), path + f'_fake_{r}.png')
+                imwrite(_rgb_to_bgr(recompressed[r]), path + f'_fake_compressed_{r}.png')
+                imwrite(_rgb_to_bgr(diff[r]), path + f'_diff_{r}.png')
+
+            pbar.update()
+
+        pbar.close()
+
+

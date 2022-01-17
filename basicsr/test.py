@@ -9,8 +9,11 @@ from basicsr.utils.options import dict2str, parse_options
 
 
 def test_pipeline(root_path):
-    # parse options, set distributed setting, set ramdom seed
+    # parse options, set distributed setting, set random seed
     opt, _ = parse_options(root_path, is_train=False)
+
+    # if opt['test_type'] not in ['val', 'fid', 'collage']:
+    #     raise ValueError(f'unknown test type: {opt["test_type"]}, expected one of: [val, fid, collage]')
 
     torch.backends.cudnn.benchmark = True
     # torch.backends.cudnn.deterministic = True
@@ -37,8 +40,16 @@ def test_pipeline(root_path):
     for test_loader in test_loaders:
         test_set_name = test_loader.dataset.opt['name']
         logger.info(f'Testing {test_set_name}...')
-        model.validation(test_loader, current_iter=opt['name'], tb_logger=None, save_img=opt['val']['save_img'],
-                         save_lq_img=opt['val']['save_lq_img'] if 'save_lq_img' in opt['val'] else False)
+        if opt.get('collage'):
+            logger.info(f'Running collage phase...')
+            model.test_collage(test_loader)
+        if opt.get('val'):
+            logger.info(f'Running validation phase...')
+            model.validation(test_loader, current_iter=opt['name'], tb_logger=None, save_img=opt['val']['save_img'],
+                             save_lq_img=opt['val']['save_lq_img'] if 'save_lq_img' in opt['val'] else False)
+        if opt.get('fid'):
+            logger.info(f'Running FID phase...')
+            model.test_fid(test_loader, repeat=opt['fid']['repeat'])
 
 
 if __name__ == '__main__':
