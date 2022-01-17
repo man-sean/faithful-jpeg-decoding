@@ -1,5 +1,5 @@
 # general settings
-name: ESRGAN_x1_qf_10_r1_penalty_stochastic_faithful_500_FFHQ128
+name: ESRGAN_x1_qf_5_r1_penalty_stochastic_faithful_1000_FFHQ128
 model_type: ESRGANModel
 scale: 1
 num_gpu: 1  # set num_gpu: 0 for cpu mode
@@ -23,7 +23,7 @@ datasets:
     gt_size: 128
     use_hflip: true
     use_rot: false
-    qf: 10
+    qf: 5
 
     # data loader
     use_shuffle: true
@@ -38,7 +38,7 @@ datasets:
     dataroot_gt: /home/sean.man/datasets/ffhq_128/val/dummy
     io_backend:
       type: disk
-    qf: 10
+    qf: 5
 
 # network structures
 network_g:
@@ -49,6 +49,7 @@ network_g:
   num_block: 23
   scale: 1
   noise_injection: true
+  noise_injection_upsample: true
 
 network_d:
   type: ResNetGANStabilityDiscriminator
@@ -86,7 +87,7 @@ train:
   # losses
   pixel_opt:
     type: JPEGFaithfulnessLoss
-    loss_weight: 500.0
+    loss_weight: 1000.0
     loss_type: 'mse'
     reduction: mean
   gan_opt:
@@ -111,7 +112,7 @@ val:
     faithfulness_rmse:
       type: calculate_jpeg_faithfulness_rmse
       crop_border: 0
-      qf: 10
+      qf: 5
       test_y_channel: false
       better: lower  # the lower, the better
     fid:

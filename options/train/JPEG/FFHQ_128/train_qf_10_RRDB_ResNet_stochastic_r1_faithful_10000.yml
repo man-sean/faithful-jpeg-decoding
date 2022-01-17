@@ -1,5 +1,5 @@
 # general settings
-name: ESRGAN_x1_qf_10_r1_penalty_stochastic_faithful_10000_FFHQ
+name: ESRGAN_x1_qf_10_r1_penalty_stochastic_faithful_10000_FFHQ128
 model_type: ESRGANModel
 scale: 1
 num_gpu: 1  # set num_gpu: 0 for cpu mode
