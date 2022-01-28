@@ -1,6 +1,7 @@
 import cv2
 import os
 import torch
+from basicsr.data.data_util import paths_from_lmdb, paths_from_folder
 from torch.utils import data as data
 from torchvision.transforms.functional import normalize
 
@@ -41,9 +42,12 @@ class JPEGDataset(data.Dataset):
         self.std = opt['std'] if 'std' in opt else None
 
         self.gt_folder = opt['dataroot_gt']
-        # it now only supports folder mode, for other modes such as lmdb and meta_info file, please see:
-        # https://github.com/xinntao/BasicSR/blob/master/basicsr/data/
-        self.paths = [os.path.join(self.gt_folder, v) for v in list(scandir(self.gt_folder))]
+        if self.io_backend_opt['type'] == 'lmdb':
+            self.io_backend_opt['db_paths'] = [self.gt_folder]
+            self.io_backend_opt['client_keys'] = ['gt']
+            self.paths = paths_from_lmdb(self.gt_folder)
+        else:
+            self.paths = paths_from_folder(self.gt_folder)
 
         self.jpeger = DiffJPEG(differentiable=True)
 
