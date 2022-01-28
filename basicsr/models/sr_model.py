@@ -326,10 +326,11 @@ class SRModel(BaseModel):
                                                                                    expansion=32,
                                                                                    keep=realizations,
                                                                                    )
+            print(f'{caption=}')
 
             imwrite(_rgb_to_bgr(real), path + '_real.png')
             imwrite(_rgb_to_bgr(compressed), path + '_compressed.png')
-            imwrite(_rgb_to_bgr(1 - std), path + '_std.png')
+            imwrite(_rgb_to_bgr(std), path + '_std.png')
             for r in range(realizations):
                 imwrite(_rgb_to_bgr(fake[r]), path + f'_fake_{r}.png')
                 imwrite(_rgb_to_bgr(recompressed[r]), path + f'_fake_compressed_{r}.png')
