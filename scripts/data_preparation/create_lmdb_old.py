@@ -5,6 +5,37 @@ from basicsr.utils import scandir
 from basicsr.utils.lmdb_util import make_lmdb_from_imgs
 
 
+def create_lmdb_for_ffhq():
+    """Create lmdb files for ImageNet dataset.
+
+    Usage:
+        Before run this script, please run `extract_subimages.py`.
+        Remember to modify opt configurations according to your settings.
+    """
+    # HR images
+    folder_path = '/home/sean.man/datasets/ffhq_128/train/dummy'
+    lmdb_path = '/home/sean.man/datasets/imagenet_patch_128/train.lmdb'
+    img_path_list, keys = prepare_keys_ffhq(folder_path)
+    make_lmdb_from_imgs(folder_path, lmdb_path, img_path_list, keys)
+
+
+def prepare_keys_ffhq(folder_path):
+    """Prepare image path list and keys for DIV2K dataset.
+
+    Args:
+        folder_path (str): Folder path.
+
+    Returns:
+        list[str]: Image path list.
+        list[str]: Key list.
+    """
+    print('Reading image path list ...')
+    img_path_list = sorted(list(scandir(folder_path, suffix='png', recursive=False)))
+    keys = [img_path.split('.png')[0] for img_path in sorted(img_path_list)]
+
+    return img_path_list, keys
+
+
 def create_lmdb_for_imagenet():
     """Create lmdb files for ImageNet dataset.
 
