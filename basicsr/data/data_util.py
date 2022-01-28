@@ -258,7 +258,7 @@ def paths_from_lmdb(folder):
     if not folder.endswith('.lmdb'):
         raise ValueError(f'Folder {folder}folder should in lmdb format.')
     with open(osp.join(folder, 'meta_info.txt')) as fin:
-        paths = [line.split('.')[0] for line in fin]
+        paths = [line.rsplit('.', maxsplit=1)[0] for line in fin]
     return paths
 
 
