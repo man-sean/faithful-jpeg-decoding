@@ -81,6 +81,7 @@ def build_dataloader(dataset, dataset_opt, num_gpu=1, dist=False, sampler=None, 
 
     dataloader_args['pin_memory'] = dataset_opt.get('pin_memory', False)
     dataloader_args['persistent_workers'] = dataset_opt.get('persistent_workers', False)
+    dataloader_args['prefetch_factor'] = dataset_opt.get('prefetch_factor', 2)
 
     prefetch_mode = dataset_opt.get('prefetch_mode')
     if prefetch_mode == 'cpu':  # CPUPrefetcher
