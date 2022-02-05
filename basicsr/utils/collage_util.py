@@ -73,7 +73,7 @@ def get_collage(batch, model, expansion, keep=1):
     std = restore_expanded_batch(std_fake, expansion).std(0)
     caption = [f'STD stats: {std[idx].mean():.4} ±{std[idx].std():.4} [{std[idx].min():.3}, {std[idx].max():.3}]'
                for idx in range(std.shape[0])]
-    std = std.pow(1/4).expand_as(real).clone()
+    std = std.pow(1 / 4).expand_as(real).clone()
     std = 1 - _to_numpy(std)
 
     # convert to numpy
@@ -87,12 +87,17 @@ def get_collage(batch, model, expansion, keep=1):
 
 
 def log_collage(dataloader, model, global_step, size=10, expansion=32):
-    batch = get_batch(dataloader, size)
-
-    real, compressed, fake, recompressed, diff, std, caption = get_collage(batch, model, expansion)
+    real, compressed, fake, recompressed, diff, std, caption = [], [], [], [], [], [], []
+    for idx, batch in enumerate(dataloader):
+        if idx >= size:
+            break
+        out = get_collage(batch, model, expansion)
+        real[len(real):], compressed[len(compressed):], fake[len(fake):], \
+            recompressed[len(recompressed):], diff[len(diff):], std[len(std):], \
+            caption[len(caption):] = tuple(zip(out))
 
     wandb.log(
-        {"collage": [wandb.Image(np.concatenate([r, c, f, rc, d, s], axis=1), caption=t)
+        {"collage": [wandb.Image(np.concatenate([r[0], c[0], f[0], rc[0], d[0], s[0]], axis=1), caption=t)
                      for r, c, f, rc, d, s, t in zip(real, compressed, fake, recompressed, diff, std, caption)],
          "global_step": global_step}
     )

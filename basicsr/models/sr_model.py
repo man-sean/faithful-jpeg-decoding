@@ -145,6 +145,7 @@ class SRModel(BaseModel):
         qf = dataloader.dataset.opt['qf']
         with_metrics = self.opt['val'].get('metrics') is not None
         use_pbar = self.opt['val'].get('pbar', False)
+        logger = get_root_logger()
 
         if with_metrics:
             if not hasattr(self, 'metric_results'):  # only execute in the first run
@@ -157,7 +158,7 @@ class SRModel(BaseModel):
 
         metric_data = dict()
         if use_pbar:
-            pbar = tqdm(total=len(dataloader), unit='image')
+            pbar = tqdm(total=len(dataloader), unit='image', desc='Validation')
 
         if self.opt['is_train']:
             log_collage(dataloader=dataloader, model=self, global_step=current_iter)
@@ -220,12 +221,13 @@ class SRModel(BaseModel):
                             self.metric_results[name] += calculate_metric(metric_data, opt_)
                 if use_pbar:
                     pbar.update(1)
-                    pbar.set_description(f'Test {img_name}')
+                    # pbar.set_description(f'Test {img_name}')
             if use_pbar:
                 pbar.close()
 
             if with_metrics:
                 if 'fid' in self.opt['val']['metrics']:
+                    logger.info(f'Computing FID')
                     fid_metric_data = {}
                     fid_metric_data['fake_path'] = tmpdirname
                     fid_metric_data['device'] = self.device
@@ -268,18 +270,27 @@ class SRModel(BaseModel):
         self.save_training_state(epoch, current_iter)
 
     def test_fid(self, dataloader, repeat):
+        logger = get_root_logger()
         dataset_name = dataloader.dataset.opt['name']
+        batch_size = dataloader.batch_size
         fids = []
 
-        for _ in trange(repeat):
+        if self.opt['fid']['opt']['gt_path'].endswith('.npz'):
+            logger.info(f'Loading FID state once for optimization')
+            with np.load(self.opt['fid']['opt']['gt_path']) as f:
+                m, s = f['mu'][:], f['sigma'][:]
+            self.opt['fid']['opt']['gt_path'] = (m, s)
+
+        for r_idx in trange(repeat):
             with tempfile.TemporaryDirectory() as tmpdirname:
-                for idx, val_data in enumerate(dataloader):
+                for idx, val_data in enumerate(tqdm(dataloader, miniters=100, mininterval=2, desc=f'Gen {r_idx+1}/{repeat}')):
                     self.feed_data(val_data)
                     self.test()
 
                     visuals = self.get_current_visuals()
-                    sr_img = tensor2img([visuals['result']])
-                    imwrite(sr_img, osp.join(tmpdirname, f'sr_{idx}.png'))
+                    for batch_idx in range(visuals['result'].shape[0]):
+                        sr_img = tensor2img([visuals['result'][batch_idx]])
+                        imwrite(sr_img, osp.join(tmpdirname, f'sr_{idx * batch_size + batch_idx}.png'))
 
                     if 'gt' in visuals:
                         del self.gt
@@ -299,7 +310,6 @@ class SRModel(BaseModel):
         fid_mean = fids.mean()
         fid_std = fids.std()
 
-        logger = get_root_logger()
         logger.info(f"FID for {dataset_name}, repeated {repeat} times: {fid_mean} ±{fid_std}")
 
     def test_collage(self, dataloader):
@@ -314,7 +324,11 @@ class SRModel(BaseModel):
 
         pbar = tqdm(total=len(idx_to_save), unit='image')
 
+        saved_images = 0
         for idx, val_data in enumerate(dataloader):
+            if saved_images == len(idx_to_save):
+                break
+
             if idx not in idx_to_save:
                 continue
 
@@ -336,6 +350,7 @@ class SRModel(BaseModel):
                 imwrite(_rgb_to_bgr(recompressed[r]), path + f'_fake_compressed_{r}.png')
                 imwrite(_rgb_to_bgr(diff[r]), path + f'_diff_{r}.png')
 
+            saved_images += 1
             pbar.update()
 
         pbar.close()
