@@ -33,6 +33,7 @@ from PIL import Image
 from scipy import linalg
 from torch.nn.functional import adaptive_avg_pool2d
 from basicsr.utils.registry import METRIC_REGISTRY
+from basicsr.utils import get_root_logger
 
 try:
     from tqdm import tqdm
@@ -60,7 +61,7 @@ from pytorch_fid.inception import InceptionV3
 #                           'to .npz statistic files'))
 
 IMAGE_EXTENSIONS = {'bmp', 'jpg', 'jpeg', 'pgm', 'png', 'ppm',
-                    'tif', 'tiff', 'webp'}
+                    'JPEG', 'tif', 'tiff', 'webp'}
 
 
 class ImagePathDataset(torch.utils.data.Dataset):
@@ -216,7 +217,9 @@ def calculate_activation_statistics(files, model, batch_size=50, dims=2048,
 
 def compute_statistics_of_path(path, model, batch_size, dims, device,
                                num_workers=1):
-    if path.endswith('.npz'):
+    if isinstance(path, tuple):
+        m, s = path[0], path[1]
+    elif path.endswith('.npz'):
         with np.load(path) as f:
             m, s = f['mu'][:], f['sigma'][:]
     else:
@@ -233,16 +236,22 @@ def compute_statistics_of_path(path, model, batch_size, dims, device,
 def calculate_fid_given_paths(fake_path, gt_path, batch_size, device, dims, num_workers=1, **kwargs):
     """Calculates the FID of two paths"""
     for p in [fake_path, gt_path]:
-        if not os.path.exists(p):
+        if isinstance(gt_path, str) and not os.path.exists(p):
             raise RuntimeError('Invalid path: %s' % p)
+
+    logger = get_root_logger()
 
     block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[dims]
     model = InceptionV3([block_idx]).to(device)
 
+    logger.info('[FID] Computing fake statistics')
     m1, s1 = compute_statistics_of_path(fake_path, model, batch_size,
                                         dims, device, num_workers)
+    logger.info('[FID] Computing real statistics')
     m2, s2 = compute_statistics_of_path(gt_path, model, batch_size,
                                         dims, device, num_workers)
+    logger.info('[FID] Computing distance')
     fid_value = calculate_frechet_distance(m1, s1, m2, s2)
+    logger.info('[FID] Done')
 
     return fid_value
