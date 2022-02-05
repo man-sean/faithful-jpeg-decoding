@@ -3,7 +3,7 @@ from torch import nn as nn
 from torch.nn import functional as F
 
 from basicsr.utils.registry import ARCH_REGISTRY
-from .arch_util import default_init_weights, make_layer, pixel_unshuffle
+from .arch_util import default_init_weights, make_layer, pixel_unshuffle, pad, unpad
 
 
 class NoiseInjectionCat(nn.Module):
@@ -140,6 +140,12 @@ class RRDBNet(nn.Module):
         self.lrelu = nn.LeakyReLU(negative_slope=0.2, inplace=True)
 
     def forward(self, x):
+        # We need to pad images for two reasons:
+        # (1) We assume x is divisible by 4 in both spatial dimensions in `pixel_unshuffle`
+        # (2) JPEG pads images to multiple of 16 before compressing, if we don't pad too, we will work in an offset
+        # Hence we pad the images to multiple of 16
+        x, padding = pad(x, padding=16)
+
         if self.scale == 2:
             feat = pixel_unshuffle(x, scale=2)
         elif self.scale == 1:
@@ -149,8 +155,13 @@ class RRDBNet(nn.Module):
         feat = self.conv_first(feat)
         body_feat = self.conv_body(self.body(feat))
         feat = feat + body_feat
+
         # upsample
         feat = self.lrelu(self.conv_up1(self.ni_1(F.interpolate(feat, scale_factor=2, mode='nearest'))))
         feat = self.lrelu(self.conv_up2(self.ni_2(F.interpolate(feat, scale_factor=2, mode='nearest'))))
         out = self.conv_last(self.lrelu(self.conv_hr(feat)))
+
+        # crop padding if needed
+        out = unpad(out, padding)
+
         return out

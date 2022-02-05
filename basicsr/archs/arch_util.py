@@ -206,6 +206,49 @@ def pixel_unshuffle(x, scale):
     return x_view.permute(0, 1, 3, 5, 2, 4).reshape(b, out_channel, h, w)
 
 
+def pad(x, padding=16):
+    """Pad input. Mimic JPEG padding behavior.
+
+    Args:
+        x (Tensor): Input images with shape (b, c, h, w).
+        padding (int): Padding.
+
+    Returns:
+        Tensor: the padded images.
+    """
+    h, w = x.shape[-2:]
+
+    if h % padding > 0:
+        h_pad = padding - h % padding
+    else:
+        h_pad = 0
+    if w % padding > 0:
+        w_pad = padding - w % padding
+    else:
+        w_pad = 0
+    pads = (0, w_pad, 0, h_pad)
+    out = F.pad(x, pads, "constant", 0)
+
+    return out, pads
+
+
+def unpad(x, pad):
+    """ Remove padding.
+
+    Args:
+        x (Tensor): Input padded images with shape (b, c, h, w).
+        pad (List[int]): Padding in (left, right, top, bottom) format.
+
+    Returns:
+        Tensor: the unpadded images.
+    """
+    if pad[2] + pad[3] > 0:
+        x = x[:, :, pad[2]:-pad[3], :]
+    if pad[0] + pad[1] > 0:
+        x = x[:, :, :, pad[0]:-pad[1]]
+    return x
+
+
 class DCNv2Pack(ModulatedDeformConvPack):
     """Modulated deformable conv for deformable alignment.
 
