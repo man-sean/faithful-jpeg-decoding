@@ -46,6 +46,8 @@ def prepare_keys(folder_path, suffix):
 
     with os.scandir(folder_path) as scanit:
         subdirs = [x.path for x in scanit if x.is_dir()]
+    if len(subdirs) == 0:
+        subdirs = [folder_path]
     print(f'Found {len(subdirs)} subdirs', flush=True)
 
     img_path_list = []
