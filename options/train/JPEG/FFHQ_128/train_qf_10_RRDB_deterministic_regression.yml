@@ -49,6 +49,7 @@ network_g:
   num_block: 23
   scale: 1
   noise_injection: false
+  noise_injection_upsample: false
 
 # path
 path:
@@ -76,7 +77,7 @@ train:
 
   # losses
   pixel_opt:
-    type: L1Loss
+    type: MSELoss
     loss_weight: 1.0
     reduction: mean
 
@@ -99,7 +100,7 @@ val:
       better: lower  # the lower, the better
     fid:
       type: calculate_fid_given_paths
-      gt_path: /home/sean.man/datasets/ffhq_128/train/dummy
+      gt_path: /home/sean.man/datasets/ffhq_128/train_fid_stats.npz
       dims: 2048
       num_workers: 10
       batch_size: 64
