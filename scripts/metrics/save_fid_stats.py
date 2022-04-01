@@ -40,6 +40,8 @@ if __name__ == '__main__':
                               'Defaults to `min(8, num_cpus)`'))
     parser.add_argument('--device', type=str, default=None,
                         help='Device to use. Like cuda, cuda:0 or cpu')
+    parser.add_argument('--suffix', type=str, default='JPEG',
+                        help='image suffix')
     parser.add_argument('--dims', type=int, default=2048,
                         choices=list(InceptionV3.BLOCK_INDEX_BY_DIM),
                         help=('Dimensionality of Inception features to use. '
@@ -76,7 +78,8 @@ if __name__ == '__main__':
         batch_size=args.batch_size,
         dims=args.dims,
         device=device,
-        num_workers=num_workers
+        num_workers=num_workers,
+        suffix=args.suffix
     )
 
     with open(args.out_path, 'wb') as f:

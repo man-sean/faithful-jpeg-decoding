@@ -129,12 +129,14 @@ class SRModel(BaseModel):
         if hasattr(self, 'net_g_ema'):
             self.net_g_ema.eval()
             with torch.no_grad():
-                self.output = self.net_g_ema(self.lq)
+                self.output = self.net_g_ema(self.lq, self.qf)
         else:
             self.net_g.eval()
             with torch.no_grad():
-                self.output = self.net_g(self.lq)
+                self.output = self.net_g(self.lq, self.qf)
             self.net_g.train()
+        if isinstance(self.output, tuple):  # in case we get two versions of the output image
+            self.output_unconstrained, self.output = self.output
 
     def dist_validation(self, dataloader, current_iter, tb_logger, save_img, save_lq_img):
         if self.opt['rank'] == 0:
@@ -142,7 +144,6 @@ class SRModel(BaseModel):
 
     def nondist_validation(self, dataloader, current_iter, tb_logger, save_img, save_lq_img):
         dataset_name = dataloader.dataset.opt['name']
-        qf = dataloader.dataset.opt['qf']
         with_metrics = self.opt['val'].get('metrics') is not None
         use_pbar = self.opt['val'].get('pbar', False)
         logger = get_root_logger()
@@ -164,7 +165,7 @@ class SRModel(BaseModel):
             log_collage(dataloader=dataloader, model=self, global_step=current_iter)
 
         with tempfile.TemporaryDirectory() as tmpdirname:
-            jpeger = DiffJPEG(differentiable=True)
+            # jpeger = DiffJPEG(differentiable=True)
             for idx, val_data in enumerate(dataloader):
                 img_name = osp.splitext(osp.basename(val_data['lq_path'][0]))[0]
                 self.feed_data(val_data)
@@ -203,7 +204,8 @@ class SRModel(BaseModel):
                     if save_lq_img:
                         imwrite(metric_data['gt_lq'], save_img_path + '_gt_lq.png')
                         # sr_lq = interpolate(sr_img_tensor, scale_factor=1.0 / self.opt['scale'], mode='nearest')
-                        fake_lq = jpeger(sr_img_tensor, quality=qf)
+                        # fake_lq = jpeger(sr_img_tensor, quality=qf)
+                        fake_lq = dataloader.dataset.create_lq(sr_img_tensor)
                         fake_lq = tensor2img(fake_lq.squeeze(0))
                         # sr_lq = imresize(sr_img, 1.0 / self.opt['scale'], antialiasing=True)
                         imwrite(fake_lq, save_img_path + '_fake_lq.png')
@@ -260,6 +262,8 @@ class SRModel(BaseModel):
         out_dict['result'] = self.output.detach().cpu()
         if hasattr(self, 'gt'):
             out_dict['gt'] = self.gt.detach().cpu()
+        if hasattr(self, 'output_unconstrained'):
+            out_dict['result_unconstrained'] = self.output_unconstrained.detach().cpu()
         return out_dict
 
     def save(self, epoch, current_iter):
@@ -339,6 +343,7 @@ class SRModel(BaseModel):
                                                                                    model=self,
                                                                                    expansion=32,
                                                                                    keep=realizations,
+                                                                                   create_lq_fn=dataloader.dataset.create_lq
                                                                                    )
             print(f'{caption=}')
 

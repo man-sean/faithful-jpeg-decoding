@@ -1,13 +1,14 @@
 import cv2
 import os
 import torch
+import numpy as np
 from basicsr.data.data_util import paths_from_lmdb, paths_from_folder
 from torch.utils import data as data
-from torchvision.transforms.functional import normalize
+from torchvision.transforms.functional import normalize, center_crop
 
 from basicsr.data.degradations import add_jpg_compression
 from basicsr.data.transforms import augment, mod_crop, paired_random_crop
-from basicsr.utils import FileClient, imfrombytes, img2tensor, scandir
+from basicsr.utils import FileClient, imfrombytes, img2tensor, scandir, get_root_logger
 from basicsr.utils.registry import DATASET_REGISTRY
 from basicsr.utils.diffjpeg import DiffJPEG
 
@@ -49,7 +50,32 @@ class JPEGDataset(data.Dataset):
         else:
             self.paths = paths_from_folder(self.gt_folder)
 
+        # diffjpeg_version = opt.get('diffjpeg_version', 1)
+        # if diffjpeg_version == 1:
+        #     self.jpeger = DiffJPEG(differentiable=True)
+        # elif diffjpeg_version == 2:
+        #     self.jpeger = DiffJPEGv2(differentiable=True)
+        # else:
+        #     raise ValueError('diffjpeg_version must be in [1, 2]')
+        # logger = get_root_logger()
+        # logger.info(f'Using DiffJPEG version {diffjpeg_version}.')
         self.jpeger = DiffJPEG(differentiable=True)
+
+    def _sample_qf(self):
+        qf = self.opt['qf']
+        if isinstance(qf, list):
+            if len(qf) == 1:
+                qf = qf[0]
+            elif len(qf) == 2:
+                min_qf, max_qf = qf[0], qf[1]
+                qf = int(np.floor(np.clip(np.random.exponential(max_qf / min_qf) + min_qf, min_qf, max_qf)))
+            else:
+                raise ValueError(f'qf should be an integer or a list with 2 elements, got {len(qf)} elements.')
+        elif isinstance(qf, int):
+            qf = qf
+        else:
+            raise ValueError(f'qf should be an integer or a list with 2 elements, got {type(qf)}.')
+        return qf
 
     def __getitem__(self, index):
         if self.file_client is None:
@@ -85,19 +111,31 @@ class JPEGDataset(data.Dataset):
         # generate lq image
         # downsample
         # add JPEG compression
-        img_lq = self.jpeger(img_lq.unsqueeze(0), quality=self.opt['qf']).squeeze(0).detach()
+        qf = self._sample_qf()
+        img_lq = self.jpeger(img_lq.unsqueeze(0), quality=qf).squeeze(0).detach()
 
         # normalize
         if self.mean is not None or self.std is not None:
             normalize(img_lq, self.mean, self.std, inplace=True)
             normalize(img_gt, self.mean, self.std, inplace=True)
 
+        # center crop
+        if self.opt.get('center_crop', None):
+            img_gt = center_crop(img_gt, self.opt['center_crop'])
+            img_lq = center_crop(img_lq, self.opt['center_crop'])
+
         return {'lq': img_lq,
                 'gt': img_gt,
                 'lq_path': gt_path,
                 'gt_path': gt_path,
-                'qf': self.opt['qf'],
+                'qf': qf,
                 }
 
     def __len__(self):
         return len(self.paths)
+
+    def create_lq(self, img_hq):
+        qf = self.opt['qf']
+        assert isinstance(qf, int), "'create_lq' does not support multiple QF values"
+        img_lq = self.jpeger(img_hq, quality=qf)
+        return img_lq

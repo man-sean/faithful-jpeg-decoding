@@ -241,7 +241,7 @@ def paths_from_folder(folder):
         list[str]: Returned path list.
     """
 
-    paths = list(scandir(folder))
+    paths = sorted(list(scandir(folder)))
     paths = [osp.join(folder, path) for path in paths]
     return paths
 

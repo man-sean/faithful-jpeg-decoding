@@ -249,6 +249,11 @@ def unpad(x, pad):
     return x
 
 
+def freeze_module(module):
+    for param in module.parameters():
+        param.requires_grad = False
+
+
 class DCNv2Pack(ModulatedDeformConvPack):
     """Modulated deformable conv for deformable alignment.
 

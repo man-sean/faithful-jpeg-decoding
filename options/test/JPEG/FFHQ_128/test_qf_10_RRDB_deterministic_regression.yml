@@ -18,8 +18,8 @@ datasets:
     qf: 10
 
     # data loader
-#    num_worker_per_gpu: 10
-#    batch_size_per_gpu: 128
+    num_worker_per_gpu: 10
+    batch_size_per_gpu: 128
 
 # network structures
 network_g:
@@ -34,15 +34,15 @@ network_g:
 
 # path
 path:
-  pretrain_network_g: /home/sean.man/faithful-jpeg-decoding/experiments/ESRGAN_x1_qf_10_deterministic_regression_FFHQ/models/net_g_225000.pth
+  pretrain_network_g: /home/sean.man/faithful-jpeg-decoding/experiments/ESRGAN_x1_qf_10_deterministic_regression_FFHQ/models/net_g_1000000.pth
   strict_load_g: true
 
 # validation settings
-val:
-  save_img: false #true
-  suffix: ~  # add suffix to saved images, if None, use exp name
-
-  metrics:
+#val:
+#  save_img: false #true
+#  suffix: ~  # add suffix to saved images, if None, use exp name
+#
+#  metrics:
 #    psnr: # metric name, can be arbitrary
 #      type: calculate_psnr
 #      crop_border: 0
@@ -51,23 +51,23 @@ val:
 #      type: calculate_ssim
 #      crop_border: 0
 #      test_y_channel: false
-    faithfulness_rmse:
-      type: calculate_jpeg_faithfulness_rmse
-      crop_border: 0
-      qf: 10
-      test_y_channel: false
-      better: lower  # the lower, the better
+#    faithfulness_rmse:
+#      type: calculate_jpeg_faithfulness_rmse
+#      crop_border: 0
+#      qf: 10
+#      test_y_channel: false
+#      better: lower  # the lower, the better
 
 # FID settings
-#fid:
-#  repeat: 32
-#  opt:
-#    type: calculate_fid_given_paths
-#    gt_path: /home/sean.man/datasets/ffhq_128/train_fid_stats.npz
-#    dims: 2048
-#    num_workers: 10
-#    batch_size: 64
-#    better: lower  # the lower, the better
+fid:
+  repeat: 32
+  opt:
+    type: calculate_fid_given_paths
+    gt_path: /home/sean.man/datasets/ffhq_128/train_fid_stats.npz
+    dims: 2048
+    num_workers: 10
+    batch_size: 64
+    better: lower  # the lower, the better
 
 # collage settings
 #collage:

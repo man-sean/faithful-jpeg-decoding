@@ -66,6 +66,11 @@ class SRGANModel(SRModel):
         else:
             self.cri_stability = None
 
+        if train_opt.get('variability_opt'):
+            self.cri_variability = build_loss(train_opt['variability_opt']).to(self.device)
+        else:
+            self.cri_variability = None
+
         self.net_d_iters = train_opt.get('net_d_iters', 1)
         self.net_d_init_iters = train_opt.get('net_d_init_iters', 0)
 

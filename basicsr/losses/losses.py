@@ -9,7 +9,7 @@ from functools import partial
 
 from basicsr.archs.vgg_arch import VGGFeatureExtractor
 from basicsr.utils.registry import LOSS_REGISTRY
-from basicsr.utils.diffjpeg import DiffJPEG
+from basicsr.utils.diffjpeg import DiffJPEG, CompressJpeg
 from .loss_util import weighted_loss
 from ..utils.matlab_imresize_differentiable import imresize
 
@@ -64,6 +64,37 @@ class FirstMomentLoss(nn.Module):
 
 
 @LOSS_REGISTRY.register()
+class MaxSTDLoss(nn.Module):
+    """maximize standard deviation of different realizations of the network of the same input.
+    IMPORTANT:  we are called every FirstMomentLoss.iters iteration.
+                This means we implicitly assume that FirstMomentLoss is used as well.
+
+    Args:
+        loss_weight (float): Loss weight for L1 loss. Default: 1.0.
+        reduction (str): Specifies the reduction to apply to the output.
+            Supported choices are 'none' | 'mean' | 'sum'. Default: 'mean'.
+    """
+
+    def __init__(self, loss_weight=1.0, reduction='mean'):
+        super(MaxSTDLoss, self).__init__()
+        if reduction not in ['mean', 'sum']:
+            raise ValueError(f'Unsupported reduction mode: {reduction}. Supported ones are: {_reduction_modes}')
+
+        self.loss_weight = loss_weight
+        self.reduction = reduction
+
+    def forward(self, std_img, **kwargs):
+        """
+        Args:
+            std_img (Tensor): of shape (N, C, H, W). Standard deviation of predicted tensors.
+        """
+        if self.reduction == 'mean':
+            return (-1) * self.loss_weight * std_img.mean()
+        elif self.reduction == 'sum':
+            return (-1) * self.loss_weight * std_img.sum()
+
+
+@LOSS_REGISTRY.register()
 class JPEGFaithfulnessLoss(nn.Module):
     """L1 (mean absolute error, MAE) loss for faithfulness.
 
@@ -73,7 +104,7 @@ class JPEGFaithfulnessLoss(nn.Module):
             Supported choices are 'none' | 'mean' | 'sum'. Default: 'mean'.
     """
 
-    def __init__(self, loss_weight=1.0, reduction='mean', loss_type='l1'):
+    def __init__(self, loss_weight=1.0, reduction='mean', loss_type='l1', order=1, annealing_opt=None):
         super(JPEGFaithfulnessLoss, self).__init__()
         if reduction not in ['none', 'mean', 'sum']:
             raise ValueError(f'Unsupported reduction mode: {reduction}. Supported ones are: {_reduction_modes}')
@@ -87,9 +118,9 @@ class JPEGFaithfulnessLoss(nn.Module):
         else:
             raise NotImplementedError()
 
-        self.jpeger = DiffJPEG(differentiable=True)
+        self.jpeger = DiffJPEG(differentiable=True, order=order)
 
-    def forward(self, pred, target, qf, weight=None, **kwargs):
+    def forward(self, pred, target, qf, weight=None, loss_weight=None, **kwargs):
         """
         Args:
             pred (Tensor): of shape (N, C, H, W). Predicted tensor.
@@ -98,7 +129,53 @@ class JPEGFaithfulnessLoss(nn.Module):
         """
         pred = self.jpeger(pred, quality=deepcopy(qf))
         target = self.jpeger(target, quality=deepcopy(qf))
-        return self.loss_weight * self.loss(pred, target, weight, reduction=self.reduction)
+        loss_weight = loss_weight if loss_weight else self.loss_weight
+        return loss_weight * self.loss(pred, target, weight, reduction=self.reduction)
+
+
+@LOSS_REGISTRY.register()
+class DCTFaithfulnessLoss(nn.Module):
+    """loss for faithfulness of unqantaized DCT coefficients.
+
+    Args:
+        loss_weight (float): Loss weight for L1 loss. Default: 1.0.
+        thr (float): Threshold to define non-zero errors outside. Default: 0.5.
+        pow (float): Power to raise non-zero errors with. Default: 1.0.
+    """
+
+    def __init__(self, loss_weight=1.0, thr=0.5, pow=1., margin=0., annealing_opt=None):
+        super(DCTFaithfulnessLoss, self).__init__()
+
+        self.loss_weight = loss_weight
+        self.thr = thr
+        self.pow = pow
+        self.margin = margin
+
+        self.jpeger = DiffJPEG(differentiable=True)
+        self.compressor = CompressJpeg(rounding=lambda x: x)
+
+    def forward(self, pred, target, qf, loss_weight=None, **kwargs):
+        """
+        Args:
+            pred (Tensor): of shape (N, C, H, W). Predicted tensor.
+            target (Tensor): of shape (N, C, H, W). Ground truth tensor.
+        """
+        def compress_and_flatten(img, factor):
+            y, cb, cr = self.compressor(img, factor=deepcopy(factor))
+            return torch.cat([y.flatten(), cb.flatten(), cr.flatten()], dim=0)
+        factor = self.jpeger.quality_to_factor(deepcopy(qf))
+        pred = compress_and_flatten(pred, factor)
+        target = compress_and_flatten(target, factor)
+        loss = (pred - torch.round(target)).abs()
+        a = (loss <= (self.thr - self.margin))
+        b = torch.logical_and((self.thr - self.margin) < loss, loss <= (self.thr + self.margin))
+        c = (loss > (self.thr + self.margin))
+        loss[a] = 0
+        if self.margin > 0:
+            loss[b] = (self.margin ** (self.pow - 2) / 4) * torch.pow(loss[b] - self.thr + self.margin, 2)
+        loss[c] = torch.pow(loss[c] - self.thr, self.pow)
+        loss_weight = loss_weight if loss_weight else self.loss_weight
+        return loss_weight * loss.mean()
 
 
 @LOSS_REGISTRY.register()
@@ -388,7 +465,7 @@ class GANLoss(nn.Module):
             for discriminators.
     """
 
-    def __init__(self, gan_type, real_label_val=1.0, fake_label_val=0.0, loss_weight=1.0):
+    def __init__(self, gan_type, real_label_val=1.0, fake_label_val=0.0, loss_weight=1.0, annealing_opt=None):
         super(GANLoss, self).__init__()
         self.gan_type = gan_type
         self.loss_weight = loss_weight
@@ -454,7 +531,7 @@ class GANLoss(nn.Module):
         target_val = (self.real_label_val if target_is_real else self.fake_label_val)
         return input.new_ones(input.size()) * target_val
 
-    def forward(self, input, target_is_real, is_disc=False):
+    def forward(self, input, target_is_real, is_disc=False, loss_weight=None):
         """
         Args:
             input (Tensor): The input for the loss module, i.e., the network
@@ -477,7 +554,8 @@ class GANLoss(nn.Module):
             loss = self.loss(input, target_label)
 
         # loss_weight is always 1.0 for discriminators
-        return loss if is_disc else loss * self.loss_weight
+        loss_weight = loss_weight if loss_weight else self.loss_weight
+        return loss if is_disc else loss * loss_weight
 
 
 @LOSS_REGISTRY.register()

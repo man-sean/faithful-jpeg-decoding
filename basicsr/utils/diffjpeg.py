@@ -1,36 +1,34 @@
 """
-Modified from https://github.com/mlomnitz/DiffJPEG
+Modified from:
+- https://github.com/mlomnitz/DiffJPEG
+- https://queuecumber.gitlab.io/torchjpeg/_modules/torchjpeg/quantization/ijg.html
 
 For images not divisible by 8
 https://dsp.stackexchange.com/questions/35339/jpeg-dct-padding/35343#35343
 """
 import itertools
+
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from copy import deepcopy
+from basicsr.utils.diff_round import diff_round, diff_round_ord3
 
 # ------------------------ utils ------------------------#
 y_table = np.array(
     [[16, 11, 10, 16, 24, 40, 51, 61], [12, 12, 14, 19, 26, 58, 60, 55], [14, 13, 16, 24, 40, 57, 69, 56],
      [14, 17, 22, 29, 51, 87, 80, 62], [18, 22, 37, 56, 68, 109, 103, 77], [24, 35, 55, 64, 81, 104, 113, 92],
      [49, 64, 78, 87, 103, 121, 120, 101], [72, 92, 95, 98, 112, 100, 103, 99]],
-    dtype=np.float32).T
-y_table = nn.Parameter(torch.from_numpy(y_table))#, requires_grad=False)
+    dtype=np.float32)#.T
+y_table = nn.Parameter(torch.from_numpy(y_table))
 c_table = np.empty((8, 8), dtype=np.float32)
 c_table.fill(99)
-c_table[:4, :4] = np.array([[17, 18, 24, 47], [18, 21, 26, 66], [24, 26, 56, 99], [47, 66, 99, 99]]).T
-c_table = nn.Parameter(torch.from_numpy(c_table))#, requires_grad=False)
+c_table[:4, :4] = np.array([[17, 18, 24, 47], [18, 21, 26, 66], [24, 26, 56, 99], [47, 66, 99, 99]])#.T
+c_table = nn.Parameter(torch.from_numpy(c_table))
 
 
-def diff_round(x):
-    """ Differentiable rounding function
-    """
-    return torch.round(x) + (x - torch.round(x))**3
-
-
-def quality_to_factor(quality):
+def quality_to_factor(quality: torch.FloatTensor):
     """ Calculate factor corresponding to quality
 
     Args:
@@ -39,11 +37,26 @@ def quality_to_factor(quality):
     Returns:
         float: Compression factor.
     """
-    if quality < 50:
-        quality = 5000. / quality
-    else:
-        quality = 200. - quality * 2
-    return quality / 100.
+    quality = quality.clone()
+    quality[quality <= 0] = 1
+    quality[quality > 100] = 100
+
+    indices_0_50 = quality < 50
+    indices_50_100 = quality >= 50
+
+    quality[indices_0_50] = torch.div(5000, quality[indices_0_50], rounding_mode='trunc')
+    quality[indices_50_100] = torch.trunc(200 - quality[indices_50_100] * 2)
+
+    return quality
+
+
+def q_table(base_table, factor):
+    b = factor.size(0)
+    mat = base_table.expand(b, 1, 8, 8) * factor.view(b, 1, 1, 1)
+    mat = torch.div((mat + 50), 100, rounding_mode='trunc')
+    mat[mat <= 0] = 1
+    mat[mat > 255] = 255
+    return mat
 
 
 # ------------------------ compression ------------------------#
@@ -167,11 +180,9 @@ class YQuantize(nn.Module):
             Tensor: batch x height x width
         """
         if isinstance(factor, (int, float)):
-            image = image.float() / (self.y_table * factor)
-        else:
-            b = factor.size(0)
-            table = self.y_table.expand(b, 1, 8, 8) * factor.view(b, 1, 1, 1)
-            image = image.float() / table
+            factor = torch.tensor([factor], dtype=torch.float)
+        table = q_table(self.y_table, factor)
+        image = image.float() / table
         image = self.rounding(image)
         return image
 
@@ -197,11 +208,9 @@ class CQuantize(nn.Module):
             Tensor: batch x height x width
         """
         if isinstance(factor, (int, float)):
-            image = image.float() / (self.c_table * factor)
-        else:
-            b = factor.size(0)
-            table = self.c_table.expand(b, 1, 8, 8) * factor.view(b, 1, 1, 1)
-            image = image.float() / table
+            factor = torch.tensor([factor], dtype=torch.float)
+        table = q_table(self.c_table, factor)
+        image = image.float() / table
         image = self.rounding(image)
         return image
 
@@ -262,11 +271,9 @@ class YDequantize(nn.Module):
             Tensor: batch x height x width
         """
         if isinstance(factor, (int, float)):
-            out = image * (self.y_table * factor)
-        else:
-            b = factor.size(0)
-            table = self.y_table.expand(b, 1, 8, 8) * factor.view(b, 1, 1, 1)
-            out = image * table
+            factor = torch.tensor([factor], dtype=torch.float)
+        table = q_table(self.y_table, factor)
+        out = image * table
         return out
 
 
@@ -287,11 +294,9 @@ class CDequantize(nn.Module):
             Tensor: batch x height x width
         """
         if isinstance(factor, (int, float)):
-            out = image * (self.c_table * factor)
-        else:
-            b = factor.size(0)
-            table = self.c_table.expand(b, 1, 8, 8) * factor.view(b, 1, 1, 1)
-            out = image * table
+            factor = torch.tensor([factor], dtype=torch.float)
+        table = q_table(self.c_table, factor)
+        out = image * table
         return out
 
 
@@ -455,28 +460,36 @@ class DiffJPEG(nn.Module):
         differentiable(bool): If True, uses custom differentiable rounding function, if False, uses standard torch.round
     """
 
-    def __init__(self, differentiable=True):
+    def __init__(self, differentiable=True, order=1):
         super(DiffJPEG, self).__init__()
         if differentiable:
-            rounding = diff_round
+            # print(f'DiffJPEG using {order=}')
+            if order == 1:
+                rounding = diff_round
+            elif order == 3:
+                rounding = diff_round_ord3
+            else:
+                raise NotImplementedError(f"DiffJPEG does not support {order=}")
         else:
             rounding = torch.round
 
         self.compress = CompressJpeg(rounding=rounding)
         self.decompress = DeCompressJpeg(rounding=rounding)
 
-    def forward(self, x, quality):
-        """
-        Args:
-            x (Tensor): Input image, bchw, rgb, [0, 1]
-            quality(float): Quality factor for jpeg compression scheme.
-        """
+    @staticmethod
+    def quality_to_factor(quality):
         factor = deepcopy(quality)
         if isinstance(factor, (int, float)):
-            factor = quality_to_factor(factor)
+            factor = torch.tensor([factor], dtype=torch.float)
+        elif torch.is_tensor(factor):
+            factor = factor.float()
         else:
-            for i in range(factor.size(0)):
-                factor[i] = quality_to_factor(factor[i])
+            raise NotImplementedError(f'quality_to_factor is not implemented for {type(factor)}')
+        factor = quality_to_factor(factor)
+        return factor
+
+    @staticmethod
+    def pad_input(x):
         h, w = x.size()[-2:]
         h_pad, w_pad = 0, 0
         # why should use 16
@@ -485,7 +498,16 @@ class DiffJPEG(nn.Module):
         if w % 16 != 0:
             w_pad = 16 - w % 16
         x = F.pad(x, (0, w_pad, 0, h_pad), mode='constant', value=0)
+        return x, h, w, h_pad, w_pad
 
+    def forward(self, x, quality):
+        """
+        Args:
+            x (Tensor): Input image, bchw, rgb, [0, 1]
+            quality(float): Quality factor for jpeg compression scheme.
+        """
+        factor = self.quality_to_factor(quality)
+        x, h, w, h_pad, w_pad = self.pad_input(x)
         y, cb, cr = self.compress(x, factor=factor)
         recovered = self.decompress(y, cb, cr, (h + h_pad), (w + w_pad), factor=factor)
         recovered = recovered[:, :, 0:h, 0:w]

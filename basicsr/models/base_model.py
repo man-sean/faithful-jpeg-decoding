@@ -368,7 +368,15 @@ class BaseModel():
                 for name, value in loss_dict.items():
                     keys.append(name)
                     losses.append(value)
-                losses = torch.stack(losses, 0)
+                try:
+                    losses = torch.stack(losses, 0)
+                except Exception as e:
+                    logger = get_root_logger()
+                    logger.warning(f'Reduce error')
+                    logger.warning(f'{loss_dict=}')
+                    logger.warning(f'{losses=}')
+                    logger.warning(f'{keys=}')
+                    raise e
                 torch.distributed.reduce(losses, dst=0)
                 if self.opt['rank'] == 0:
                     losses /= self.opt['world_size']

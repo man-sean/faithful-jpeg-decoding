@@ -13,8 +13,8 @@ import torch.nn.functional as F
 from basicsr.utils.img_util import img2tensor, tensor2img
 
 
-hr_folder = '/home/sean.man/datasets/ffhq_128/val/dummy/*.png'
-lr_folder = '/home/sean.man/datasets/ffhq_64/val/dummy'
+hr_folder = '/home/sean.man/datasets/ffhq_128/test/dummy/*.png'
+lr_folder = '/home/sean.man/datasets/ffhq_64/test/dummy'
 print(f'HR folder: {hr_folder}')
 print(f'LR folder: {lr_folder}')
 if not osp.exists(lr_folder):

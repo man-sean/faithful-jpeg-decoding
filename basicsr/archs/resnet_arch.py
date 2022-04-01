@@ -36,8 +36,7 @@ class ResNetGANStabilityDiscriminator(nn.Module):
 
         self.fc = nn.Linear(16*nf*s0*s0, 1)
 
-
-    def forward(self, x):
+    def forward(self, x, *args, **kwargs):
         batch_size = x.size(0)
 
         out = self.conv_img(x)
@@ -90,7 +89,6 @@ class ResnetBlock(nn.Module):
         if self.learned_shortcut:
             self.conv_s = nn.Conv2d(self.fin, self.fout, 1, stride=1, padding=0, bias=False)
 
-
     def forward(self, x):
         x_s = self._shortcut(x)
         dx = self.conv_0(actvn(x))
@@ -107,6 +105,49 @@ class ResnetBlock(nn.Module):
         return x_s
 
 
+class Bias(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.bias = nn.Parameter(torch.zeros(1, channels, 1, 1))
+
+    def forward(self, x, **kwargs):
+        return x + self.bias
+
+
+class ConvBiasNormLayer(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, padding):
+        super().__init__()
+        self.layers = nn.Sequential(
+            nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, padding=padding),
+            Bias(out_channels),
+        )
+
+    def forward(self, x):
+        return self.layers(x)
+
+
+@ARCH_REGISTRY.register()
+class ConditionalResNetDiscriminator(ResNetGANStabilityDiscriminator):
+    def __init__(self, size, embed_size=256, nfilter=64):
+        super().__init__(size=size, embed_size=embed_size, nfilter=nfilter)
+        self.x_conv = nn.Conv2d(3, 1 * self.nf, 3, padding=1)
+        self.y_conv = nn.Sequential(
+            ConvBiasNormLayer(3, 64, 3, 1),
+            ConvBiasNormLayer(64, 64, 3, 1),
+            ConvBiasNormLayer(64, 64, 3, 1),
+            ConvBiasNormLayer(64, 64, 3, 1),
+        )
+        self.conv_img = nn.Conv2d(self.nf + 64, 1*self.nf, 3, padding=1)
+
+    def forward(self, x, y, *args, **kwargs):  # noqa
+        img = torch.cat([self.x_conv(x), self.y_conv(y)], dim=1)
+        return super().forward(x=img)
+
+
+
 def actvn(x):
     out = F.leaky_relu(x, 2e-1)
     return out
+
+# net = ResNetGANStabilityDiscriminator(size=128, nfilter=32)
+# print(sum(p.numel() for p in net.parameters() if p.requires_grad))

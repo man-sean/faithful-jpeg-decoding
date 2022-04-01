@@ -6,6 +6,26 @@ from basicsr.utils.diffjpeg import DiffJPEG
 from basicsr.utils.batch_util import expand_batch, restore_expanded_batch, get_batch
 
 
+def run_once(f):
+    def wrapper(*args, **kwargs):
+        if not wrapper.has_run:
+            wrapper.has_run = True
+            return f(*args, **kwargs)
+
+    wrapper.has_run = False
+    return wrapper
+
+
+@run_once
+def print_img_paths(dataloader, size):
+    print("[Collage] Printing once")
+    for idx, batch in enumerate(dataloader):
+        if idx >= size:
+            break
+        print(f"[Collage] Adding {batch['gt_path']} to collage")
+    print("[Collage] End printing")
+
+
 def rgb_to_ycbcr(image: torch.Tensor) -> torch.Tensor:
     r"""Convert an RGB image to YCbCr.
 
@@ -38,11 +58,11 @@ def rgb_to_ycbcr(image: torch.Tensor) -> torch.Tensor:
     return torch.stack((y, cb, cr), -3)
 
 
-def get_collage(batch, model, expansion, keep=1):
+def get_collage(batch, model, expansion, keep=1, create_lq_fn=lambda x: x):
     def _to_numpy(x):
         return np.einsum('...chw->...hwc', x.detach().clamp_(0, 1).cpu().numpy())
 
-    jpeger = DiffJPEG(differentiable=True)
+    # jpeger = DiffJPEG(differentiable=True)
 
     # expand batch
     inputs = ["gt", "lq", "qf"]
@@ -57,7 +77,8 @@ def get_collage(batch, model, expansion, keep=1):
     real = restore_expanded_batch(visuals['gt'], expansion)[:keep]
     compressed = restore_expanded_batch(visuals['lq'], expansion)[:keep]
     fake = restore_expanded_batch(visuals['result'], expansion)[:keep]
-    recompressed = restore_expanded_batch(jpeger(visuals['result'], quality=xbatch['qf']), expansion)[:keep]
+    # recompressed = restore_expanded_batch(jpeger(visuals['result'], quality=xbatch['qf']), expansion)[:keep]
+    recompressed = restore_expanded_batch(create_lq_fn(visuals['result']), expansion)[:keep]
     diff = (compressed - recompressed).abs()
 
     # remove redundancies
@@ -88,13 +109,16 @@ def get_collage(batch, model, expansion, keep=1):
 
 def log_collage(dataloader, model, global_step, size=10, expansion=32):
     real, compressed, fake, recompressed, diff, std, caption = [], [], [], [], [], [], []
+
+    print_img_paths(dataloader=dataloader, size=size)  # will run only once
+
     for idx, batch in enumerate(dataloader):
         if idx >= size:
             break
-        out = get_collage(batch, model, expansion)
+        out = get_collage(batch, model, expansion, create_lq_fn=dataloader.dataset.create_lq)
         real[len(real):], compressed[len(compressed):], fake[len(fake):], \
-            recompressed[len(recompressed):], diff[len(diff):], std[len(std):], \
-            caption[len(caption):] = tuple(zip(out))
+        recompressed[len(recompressed):], diff[len(diff):], std[len(std):], \
+        caption[len(caption):] = tuple(zip(out))
 
     wandb.log(
         {"collage": [wandb.Image(np.concatenate([r[0], c[0], f[0], rc[0], d[0], s[0]], axis=1), caption=t)
