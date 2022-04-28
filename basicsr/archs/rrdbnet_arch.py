@@ -24,7 +24,8 @@ class NoiseInjectionCat(nn.Module):
 class NoiseInjectionAdd(nn.Module):
     def __init__(self):
         super().__init__()
-        self.weight = nn.Parameter(torch.zeros(1, 1, 1, 1))
+        # self.weight = nn.Parameter(torch.zeros(1, 1, 1, 1))
+        self.weight = nn.Parameter(torch.ones(1, 1, 1, 1))
 
     def forward(self, x, noise_std=1.0):
         batch, _, height, width = x.shape
