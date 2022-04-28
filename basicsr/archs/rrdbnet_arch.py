@@ -5,6 +5,7 @@ import torchvision
 from basicsr.utils.diffjpeg import CompressJpeg, DiffJPEG, DeCompressJpeg
 from torch import nn as nn
 from torch.nn import functional as F
+from torch.profiler import record_function
 
 from basicsr.utils.registry import ARCH_REGISTRY
 from .arch_util import default_init_weights, make_layer, pixel_unshuffle, pad, unpad, freeze_module
@@ -199,28 +200,35 @@ class RRDBNet(nn.Module):
         # (1) We assume x is divisible by 4 in both spatial dimensions in `pixel_unshuffle`
         # (2) JPEG pads images to multiple of 16 before compressing, if we don't pad too, we will work in an offset
         # Hence we pad the images to multiple of 16
-        x_, padding = pad(x, padding=16)
+        with record_function('pad_input'):
+            x_, padding = pad(x, padding=16)
 
-        if self.scale == 2:
-            feat = pixel_unshuffle(x_, scale=2)
-        elif self.scale == 1:
-            feat = pixel_unshuffle(x_, scale=4)
-        else:
-            feat = x_
-        feat = self.conv_first(feat)
-        body_feat = self.conv_body(self.body(feat))
-        feat = feat + body_feat
+        with record_function('unshuffle'):
+            if self.scale == 2:
+                feat = pixel_unshuffle(x_, scale=2)
+            elif self.scale == 1:
+                feat = pixel_unshuffle(x_, scale=4)
+            else:
+                feat = x_
+        with record_function('first_conv'):
+            feat = self.conv_first(feat)
+        with record_function('body_conv'):
+            body_feat = self.conv_body(self.body(feat))
+            feat = feat + body_feat
 
         # upsample
-        feat = self.lrelu(self.conv_up1(self.ni_1(F.interpolate(feat, scale_factor=2, mode='nearest'))))
-        feat = self.lrelu(self.conv_up2(self.ni_2(F.interpolate(feat, scale_factor=2, mode='nearest'))))
-        out = self.conv_last(self.lrelu(self.conv_hr(feat)))
+        with record_function('upsample'):
+            feat = self.lrelu(self.conv_up1(self.ni_1(F.interpolate(feat, scale_factor=2, mode='nearest'))))
+            feat = self.lrelu(self.conv_up2(self.ni_2(F.interpolate(feat, scale_factor=2, mode='nearest'))))
+            out = self.conv_last(self.lrelu(self.conv_hr(feat)))
 
-        # crop padding if needed
-        out = unpad(out, padding)
+        with record_function('unpad_output'):
+            # crop padding if needed
+            out = unpad(out, padding)
         # torchvision.utils.save_image(out[0], "/home/sean.man/RRDBNet_output_img.png")
 
         # enforce consistency if necessary
-        out = self.enforce_consistency(x, out, qf)
+        with record_function('enforce_consistency'):
+            out = self.enforce_consistency(x, out, qf)
 
         return out
