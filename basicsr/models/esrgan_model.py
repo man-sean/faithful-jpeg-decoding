@@ -104,9 +104,11 @@ class ESRGANModel(SRGANModel):
                 loss_dict['l_g_stab'] = l_g_stab
             # variability loss
             if self.cri_variability and current_iter % self.cri_stability.iters == 0:
-                l_g_var = self.cri_variability(penalty_std_output)
+                weight_var = self.current_weight('variability_opt', current_iter)
+                l_g_var = self.cri_variability(penalty_std_output, loss_weight=weight_var)
                 l_g_total += l_g_var
                 loss_dict['l_g_var'] = l_g_var
+                loss_dict['w_g_var'] = torch.tensor(weight_var, dtype=torch.float32, device=l_g_var.device)
             # perceptual loss
             if self.cri_perceptual:
                 l_g_percep, l_g_style = self.cri_perceptual(self.output, self.gt)
