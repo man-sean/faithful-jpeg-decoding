@@ -75,7 +75,7 @@ class MaxSTDLoss(nn.Module):
             Supported choices are 'none' | 'mean' | 'sum'. Default: 'mean'.
     """
 
-    def __init__(self, loss_weight=1.0, reduction='mean'):
+    def __init__(self, loss_weight=1.0, reduction='mean', annealing_opt=None):
         super(MaxSTDLoss, self).__init__()
         if reduction not in ['mean', 'sum']:
             raise ValueError(f'Unsupported reduction mode: {reduction}. Supported ones are: {_reduction_modes}')
@@ -83,15 +83,16 @@ class MaxSTDLoss(nn.Module):
         self.loss_weight = loss_weight
         self.reduction = reduction
 
-    def forward(self, std_img, **kwargs):
+    def forward(self, std_img, loss_weight=None, **kwargs):
         """
         Args:
             std_img (Tensor): of shape (N, C, H, W). Standard deviation of predicted tensors.
         """
+        loss_weight = loss_weight if loss_weight else self.loss_weight
         if self.reduction == 'mean':
-            return (-1) * self.loss_weight * std_img.mean()
+            return (-1) * loss_weight * std_img.mean()
         elif self.reduction == 'sum':
-            return (-1) * self.loss_weight * std_img.sum()
+            return (-1) * loss_weight * std_img.sum()
 
 
 @LOSS_REGISTRY.register()
