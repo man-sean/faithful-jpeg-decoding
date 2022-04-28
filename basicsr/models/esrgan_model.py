@@ -24,9 +24,6 @@ class ESRGANModel(SRGANModel):
         #     xdata = {k: expand_batch(v[:penalty_batch_size], expansion) for k, v in data.items() if k in inputs}
         #     data = {k: torch.cat((data[k], v), dim=0) for k, v in xdata.items()}
         super(ESRGANModel, self).feed_data(data=data)
-        # add support for jpeg qf
-        if 'qf' in data:
-            self.qf = data['qf'].to(self.device)
 
     def expand_penalty_batch(self):
         penalty_batch_size = self.cri_stability.batch_size
@@ -76,7 +73,7 @@ class ESRGANModel(SRGANModel):
 
         if self.cri_stability and current_iter % self.cri_stability.iters == 0:
             self.expand_penalty_batch()
-            output = self.net_g(self.lq, self.qf)
+            output = self.net_g(x=self.lq, qf=self.qf)
             if isinstance(output, tuple):  # in case we get two versions of the output image
                 output_unconstrained, output = output
             else:
@@ -84,7 +81,7 @@ class ESRGANModel(SRGANModel):
             self.output, penalty_mean_output, penalty_std_output = self.restore_penalty_batch(output, calc_std=self.cri_variability)
             self.output_unconstrained, _, _ = self.restore_penalty_batch(output_unconstrained, calc_std=self.cri_variability)
         else:
-            self.output = self.net_g(self.lq, self.qf)
+            self.output = self.net_g(x=self.lq, qf=self.qf)
             if isinstance(self.output, tuple):  # in case we get two versions of the output image
                 self.output_unconstrained, self.output = self.output
             else:
