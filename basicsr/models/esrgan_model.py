@@ -69,72 +69,76 @@ class ESRGANModel(SRGANModel):
         for p in self.net_d.parameters():
             p.requires_grad = False
 
-        self.optimizer_g.zero_grad()
+        # self.optimizer_g.zero_grad()
 
-        if self.cri_stability and current_iter % self.cri_stability.iters == 0:
-            self.expand_penalty_batch()
-            output = self.net_g(x=self.lq, qf=self.qf)
-            if isinstance(output, tuple):  # in case we get two versions of the output image
-                output_unconstrained, output = output
+        with self.cast():  # Use AMP if configured
+            if self.cri_stability and current_iter % self.cri_stability.iters == 0:
+                self.expand_penalty_batch()
+                output = self.net_g(x=self.lq, qf=self.qf)
+                if isinstance(output, tuple):  # in case we get two versions of the output image
+                    output_unconstrained, output = output
+                else:
+                    output_unconstrained = output
+                self.output, penalty_mean_output, penalty_std_output = self.restore_penalty_batch(output, calc_std=self.cri_variability)
+                self.output_unconstrained, _, _ = self.restore_penalty_batch(output_unconstrained, calc_std=self.cri_variability)
             else:
-                output_unconstrained = output
-            self.output, penalty_mean_output, penalty_std_output = self.restore_penalty_batch(output, calc_std=self.cri_variability)
-            self.output_unconstrained, _, _ = self.restore_penalty_batch(output_unconstrained, calc_std=self.cri_variability)
-        else:
-            self.output = self.net_g(x=self.lq, qf=self.qf)
-            if isinstance(self.output, tuple):  # in case we get two versions of the output image
-                self.output_unconstrained, self.output = self.output
-            else:
-                self.output_unconstrained = self.output
+                self.output = self.net_g(x=self.lq, qf=self.qf)
+                if isinstance(self.output, tuple):  # in case we get two versions of the output image
+                    self.output_unconstrained, self.output = self.output
+                else:
+                    self.output_unconstrained = self.output
 
         l_g_total = 0
         loss_dict = OrderedDict()
         if (current_iter % self.net_d_iters == 0 and current_iter > self.net_d_init_iters):
-            # pixel loss
-            if self.cri_pix:
-                weight_pix = self.current_weight('pixel_opt', current_iter)
-                l_g_pix = self.cri_pix(self.output_unconstrained, self.gt, qf=self.qf, loss_weight=weight_pix)
-                l_g_total += l_g_pix
-                loss_dict['l_g_pix'] = l_g_pix
-                loss_dict['w_g_pix'] = torch.tensor(weight_pix, dtype=torch.float32, device=l_g_pix.device)
-            # stability loss
-            if self.cri_stability and current_iter % self.cri_stability.iters == 0:
-                l_g_stab = self.cri_stability(penalty_mean_output, self.gt)
-                l_g_total += l_g_stab
-                loss_dict['l_g_stab'] = l_g_stab
-            # variability loss
-            if self.cri_variability and current_iter % self.cri_stability.iters == 0:
-                weight_var = self.current_weight('variability_opt', current_iter)
-                l_g_var = self.cri_variability(penalty_std_output, loss_weight=weight_var)
-                l_g_total += l_g_var
-                loss_dict['l_g_var'] = l_g_var
-                loss_dict['w_g_var'] = torch.tensor(weight_var, dtype=torch.float32, device=l_g_var.device)
-            # perceptual loss
-            if self.cri_perceptual:
-                l_g_percep, l_g_style = self.cri_perceptual(self.output, self.gt)
-                if l_g_percep is not None:
-                    l_g_total += l_g_percep
-                    loss_dict['l_g_percep'] = l_g_percep
-                if l_g_style is not None:
-                    l_g_total += l_g_style
-                    loss_dict['l_g_style'] = l_g_style
-            # gan loss
-            weight_gan = self.current_weight('gan_opt', current_iter)
-            fake_g_pred = self.net_d(x=self.output, y=self.lq)
-            l_g_gan = self.cri_gan(fake_g_pred, True, is_disc=False, loss_weight=weight_gan)
+            with self.cast():  # Use AMP if configured
+                # pixel loss
+                if self.cri_pix:
+                    weight_pix = self.current_weight('pixel_opt', current_iter)
+                    l_g_pix = self.cri_pix(self.output_unconstrained, self.gt, qf=self.qf, loss_weight=weight_pix)
+                    l_g_total += l_g_pix
+                    loss_dict['l_g_pix'] = l_g_pix
+                    loss_dict['w_g_pix'] = torch.tensor(weight_pix, dtype=torch.float32, device=l_g_pix.device)
+                # stability loss
+                if self.cri_stability and current_iter % self.cri_stability.iters == 0:
+                    l_g_stab = self.cri_stability(penalty_mean_output, self.gt)
+                    l_g_total += l_g_stab
+                    loss_dict['l_g_stab'] = l_g_stab
+                # variability loss
+                if self.cri_variability and current_iter % self.cri_stability.iters == 0:
+                    weight_var = self.current_weight('variability_opt', current_iter)
+                    l_g_var = self.cri_variability(penalty_std_output, loss_weight=weight_var)
+                    l_g_total += l_g_var
+                    loss_dict['l_g_var'] = l_g_var
+                    loss_dict['w_g_var'] = torch.tensor(weight_var, dtype=torch.float32, device=l_g_var.device)
+                # perceptual loss
+                if self.cri_perceptual:
+                    l_g_percep, l_g_style = self.cri_perceptual(self.output, self.gt)
+                    if l_g_percep is not None:
+                        l_g_total += l_g_percep
+                        loss_dict['l_g_percep'] = l_g_percep
+                    if l_g_style is not None:
+                        l_g_total += l_g_style
+                        loss_dict['l_g_style'] = l_g_style
+                # gan loss
+                weight_gan = self.current_weight('gan_opt', current_iter)
+                fake_g_pred = self.net_d(x=self.output, y=self.lq)
+                l_g_gan = self.cri_gan(fake_g_pred, True, is_disc=False, loss_weight=weight_gan)
 
-            l_g_total += l_g_gan
-            loss_dict['l_g_gan'] = l_g_gan
-            loss_dict['w_g_gan'] = torch.tensor(weight_gan, dtype=torch.float32, device=l_g_gan.device)
+                l_g_total += l_g_gan
+                loss_dict['l_g_gan'] = l_g_gan
+                loss_dict['w_g_gan'] = torch.tensor(weight_gan, dtype=torch.float32, device=l_g_gan.device)
 
-            l_g_total.backward()
-            self.optimizer_g.step()
+            # l_g_total.backward()
+            # self.optimizer_g.step()
+            self.calc_gradients(l_g_total)
+            self.optimizer_step(self.optimizer_g, update_scaler=False)  # AMP scaler should be updated after all optimizers have stepped
 
         # optimize net_d
         for p in self.net_d.parameters():
             p.requires_grad = True
 
-        self.optimizer_d.zero_grad()
+        # self.optimizer_d.zero_grad()
         # gan loss (relativistic gan)
 
         # In order to avoid the error in distributed training:
@@ -147,29 +151,32 @@ class ESRGANModel(SRGANModel):
         # real
         if self.r1_penalty_coef > 0.0:
             self.gt.requires_grad = True
-        real_d_pred = self.net_d(x=self.gt, y=self.lq)
-        if self.r1_penalty_coef > 0.0:
-            l_d_r1 = r1_penalty(real_d_pred, self.gt)
-            l_d_r1 = ((self.r1_penalty_coef / 2) * l_d_r1 + 0 * real_d_pred[0])
-            # TODO: why do we need to add 0 * real_pred, otherwise, a runtime
-            # error will arise: RuntimeError: Expected to have finished
-            # reduction in the prior iteration before starting a new one.
-            # This error indicates that your module has parameters that were
-            # not used in producing loss.
-            loss_dict['l_d_r1'] = l_d_r1.detach().mean()
-        else:
-            l_d_r1 = 0
-        # logger = get_root_logger()
-        l_d_real = self.cri_gan(real_d_pred, True, is_disc=True)
-        # logger.warning(f'Loss shape #1: {l_d_real.shape=}, {l_d_r1.shape=}')
-        l_d_real = l_d_real + l_d_r1
-        # logger.warning(f'Loss shape #1: {l_d_real.shape=}, {l_d_real[0].shape=}')
-        l_d_real.backward()
+        with self.cast():  # Use AMP if configured
+            real_d_pred = self.net_d(x=self.gt, y=self.lq)
+            if self.r1_penalty_coef > 0.0:
+                l_d_r1 = r1_penalty(real_d_pred, self.gt)
+                l_d_r1 = ((self.r1_penalty_coef / 2) * l_d_r1 + 0 * real_d_pred[0])
+                # TODO: why do we need to add 0 * real_pred, otherwise, a runtime
+                # error will arise: RuntimeError: Expected to have finished
+                # reduction in the prior iteration before starting a new one.
+                # This error indicates that your module has parameters that were
+                # not used in producing loss.
+                loss_dict['l_d_r1'] = l_d_r1.detach().mean()
+            else:
+                l_d_r1 = 0
+            l_d_real = self.cri_gan(real_d_pred, True, is_disc=True)
+            l_d_real = l_d_real + l_d_r1
+        # l_d_real.backward()
+        self.calc_gradients(l_d_real)
         # fake
-        fake_d_pred = self.net_d(x=self.output.detach(), y=self.lq)
-        l_d_fake = self.cri_gan(fake_d_pred, False, is_disc=True)
-        l_d_fake.backward()
-        self.optimizer_d.step()
+        with self.cast():  # Use AMP if configured
+            # print(f'{self.output.is_contiguous(memory_format=torch.channels_last)=}')
+            fake_d_pred = self.net_d(x=self.output.detach(), y=self.lq)
+            l_d_fake = self.cri_gan(fake_d_pred, False, is_disc=True)
+        # l_d_fake.backward()
+        # self.optimizer_d.step()
+        self.calc_gradients(l_d_fake)
+        self.optimizer_step(self.optimizer_d)
 
         # if l_d_real.shape != l_d_fake.shape:
         #     logger = get_root_logger()

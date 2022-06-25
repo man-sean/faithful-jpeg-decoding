@@ -9,6 +9,25 @@ from basicsr.models import lr_scheduler as lr_scheduler
 from basicsr.utils import get_root_logger
 from basicsr.utils.dist_util import master_only
 
+# load_amp = (hasattr(torch.cuda, "amp") and hasattr(torch.cuda.amp, "autocast"))
+# if load_amp:
+#     from torch.cuda.amp import autocast, GradScaler
+#     get_root_logger().info("AMP library available")
+# else:
+#     get_root_logger().info("AMP library not available")
+from torch.cuda.amp import autocast, GradScaler
+
+
+class nullcast():
+    # nullcontext:
+    # https://github.com/python/cpython/commit/0784a2e5b174d2dbf7b144d480559e650c5cf64c
+    def __init__(self):
+        pass
+    def __enter__(self):
+        pass
+    def __exit__(self, *excinfo):
+        pass
+
 
 class BaseModel():
     """Base model."""
@@ -83,6 +102,9 @@ class BaseModel():
             net_g_ema_params[k].data.mul_(decay).add_(net_g_params[k].data, alpha=1 - decay)
 
     def get_current_log(self):
+        # call .item() only when needed (i.e. logs are about to be printed) to reduce GPU-CPU sync.
+        for name, value in self.log_dict.items():
+            self.log_dict[name] = value.item()
         return self.log_dict
 
     def model_to_device(self, net):
@@ -318,6 +340,8 @@ class BaseModel():
                 state['optimizers'].append(o.state_dict())
             for s in self.schedulers:
                 state['schedulers'].append(s.state_dict())
+            if self.opt['is_train'] and self.amp:
+                state['amp_scaler'] = self.amp_scaler.state_dict()
             save_filename = f'{current_iter}.state'
             save_path = os.path.join(self.opt['path']['training_states'], save_filename)
 
@@ -352,6 +376,59 @@ class BaseModel():
             self.optimizers[i].load_state_dict(o)
         for i, s in enumerate(resume_schedulers):
             self.schedulers[i].load_state_dict(s)
+        if self.opt['is_train'] and self.opt['use_amp']:
+            if resume_state.get('amp_scaler', None):
+                self.amp_scaler.load_state_dict(resume_state['amp_scaler'])
+            else:
+                logger = get_root_logger()
+                logger.warning(f'Resuming from checkpoint without AMP state while config has use_amp=True')
+
+    def setup_amp(self):
+        self.amp = self.opt.get('use_amp', False)
+        logger = get_root_logger()
+        if self.amp:
+            self.cast = autocast
+            self.amp_scaler = GradScaler()
+            logger.info("AMP enabled")
+        else:
+            self.cast = nullcast
+
+    def calc_gradients(self, loss):
+        """Calculate gradients.
+        If AMP is enabled, calls backward() on scaled loss to create
+        scaled gradients, otherwise uses regular gradients calculation.
+        """
+        if self.amp:
+            self.amp_scaler.scale(loss).backward()
+        else:
+            loss.backward()
+
+    def optimizer_step(self, optimizer, update_scaler=True):
+        """Take an optimizer step.
+        Given the current training step and an optimizer, will take
+        an optimization step based on the calculated gradients.
+        Will only step and clear gradient if virtual batch has completed.
+
+        If AMP is enabled, will unscale gradients of the optimizer's
+        params and then call optimizer.step() if there are no infs/NaNs
+        in gradients, otherwise the step will be skipped and GradScaler's
+        scale is updated for next iteration.
+        """
+        if self.amp:
+            self.amp_scaler.unscale_(optimizer)
+            self.amp_scaler.step(optimizer)
+            if update_scaler:
+                self.amp_scaler.update()
+            # TODO: remove. for debugging AMP
+            # print("AMP Scaler state dict: ", self.amp_scaler.state_dict())
+        else:
+            optimizer.step()
+        optimizer.zero_grad()
+
+    def change_memory_format(self, tensor):
+        if hasattr(self, 'amp') and self.amp:
+            return tensor.to(memory_format=torch.channels_last)
+        return tensor
 
     def reduce_loss_dict(self, loss_dict):
         """reduce loss dict.
@@ -384,6 +461,6 @@ class BaseModel():
 
             log_dict = OrderedDict()
             for name, value in loss_dict.items():
-                log_dict[name] = value.mean().item()
+                log_dict[name] = value.mean()
 
             return log_dict

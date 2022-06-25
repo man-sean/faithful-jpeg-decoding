@@ -78,6 +78,11 @@ class SRGANModel(SRModel):
         self.setup_optimizers()
         self.setup_schedulers()
 
+        # set up AMP
+        self.setup_amp()
+        self.net_g = self.change_memory_format(self.net_g)
+        self.net_d = self.change_memory_format(self.net_d)
+
     def setup_optimizers(self):
         train_opt = self.opt['train']
         # optimizer g
@@ -94,67 +99,79 @@ class SRGANModel(SRModel):
         for p in self.net_d.parameters():
             p.requires_grad = False
 
-        self.optimizer_g.zero_grad()
-        self.output = self.net_g(self.lq)
+        # self.optimizer_g.zero_grad()
+        with self.cast():  # Use AMP if configured
+            self.output = self.net_g(self.lq)
 
         l_g_total = 0
         loss_dict = OrderedDict()
         if (current_iter % self.net_d_iters == 0 and current_iter > self.net_d_init_iters):
-            # pixel loss
-            if self.cri_pix:
-                l_g_pix = self.cri_pix(self.output, self.gt)
-                l_g_total += l_g_pix
-                loss_dict['l_g_pix'] = l_g_pix
-            # perceptual loss
-            if self.cri_perceptual:
-                l_g_percep, l_g_style = self.cri_perceptual(self.output, self.gt)
-                if l_g_percep is not None:
-                    l_g_total += l_g_percep
-                    loss_dict['l_g_percep'] = l_g_percep
-                if l_g_style is not None:
-                    l_g_total += l_g_style
-                    loss_dict['l_g_style'] = l_g_style
-            # gan loss
-            fake_g_pred = self.net_d(self.output)
-            l_g_gan = self.cri_gan(fake_g_pred, True, is_disc=False)
-            l_g_total += l_g_gan
-            loss_dict['l_g_gan'] = l_g_gan
+            with self.cast():  # Use AMP if configured
+                # pixel loss
+                if self.cri_pix:
+                    l_g_pix = self.cri_pix(self.output, self.gt)
+                    l_g_total += l_g_pix
+                    loss_dict['l_g_pix'] = l_g_pix
+                # perceptual loss
+                if self.cri_perceptual:
+                    l_g_percep, l_g_style = self.cri_perceptual(self.output, self.gt)
+                    if l_g_percep is not None:
+                        l_g_total += l_g_percep
+                        loss_dict['l_g_percep'] = l_g_percep
+                    if l_g_style is not None:
+                        l_g_total += l_g_style
+                        loss_dict['l_g_style'] = l_g_style
+                # gan loss
+                fake_g_pred = self.net_d(self.output)
+                l_g_gan = self.cri_gan(fake_g_pred, True, is_disc=False)
+                l_g_total += l_g_gan
+                loss_dict['l_g_gan'] = l_g_gan
 
-            l_g_total.backward()
-            self.optimizer_g.step()
+            # l_g_total.backward()
+            # self.optimizer_g.step()
+            self.calc_gradients(l_g_total)
+            self.optimizer_step(self.optimizer_g)
 
         # optimize net_d
         for p in self.net_d.parameters():
             p.requires_grad = True
 
-        self.optimizer_d.zero_grad()
-        # real
-        real_d_pred = self.net_d(self.gt)
-        l_d_real = self.cri_gan(real_d_pred, True, is_disc=True)
-        loss_dict['l_d_real'] = l_d_real
-        loss_dict['out_d_real'] = torch.mean(real_d_pred.detach())
-        l_d_real.backward()
-        # fake
-        fake_d_pred = self.net_d(self.output.detach())
-        l_d_fake = self.cri_gan(fake_d_pred, False, is_disc=True)
-        loss_dict['l_d_fake'] = l_d_fake
-        loss_dict['out_d_fake'] = torch.mean(fake_d_pred.detach())
-        l_d_fake.backward()
+        # self.optimizer_d.zero_grad()
+        with self.cast():  # Use AMP if configured
+            # real
+            real_d_pred = self.net_d(self.gt)
+            l_d_real = self.cri_gan(real_d_pred, True, is_disc=True)
+            loss_dict['l_d_real'] = l_d_real
+            loss_dict['out_d_real'] = torch.mean(real_d_pred.detach())
+        # l_d_real.backward()
+        self.calc_gradients(l_d_real)
+
+        with self.cast():  # Use AMP if configured
+            # fake
+            fake_d_pred = self.net_d(self.output.detach())
+            l_d_fake = self.cri_gan(fake_d_pred, False, is_disc=True)
+            loss_dict['l_d_fake'] = l_d_fake
+            loss_dict['out_d_fake'] = torch.mean(fake_d_pred.detach())
+        # l_d_fake.backward()
+        self.calc_gradients(l_d_fake)
 
         if self.r1_penalty_coef > 0.0:
-            self.gt.requires_grad = True
-            real_pred = self.net_d(self.gt)
-            l_d_r1 = r1_penalty(real_pred, self.gt)
-            l_d_r1 = (self.r1_penalty_coef / 2 * l_d_r1 * self.net_d_reg_every + 0 * real_pred[0])
-            # TODO: why do we need to add 0 * real_pred, otherwise, a runtime
-            # error will arise: RuntimeError: Expected to have finished
-            # reduction in the prior iteration before starting a new one.
-            # This error indicates that your module has parameters that were
-            # not used in producing loss.
-            loss_dict['l_d_r1'] = l_d_r1.detach().mean()
-            l_d_r1.backward()
+            with self.cast():  # Use AMP if configured
+                self.gt.requires_grad = True
+                real_pred = self.net_d(self.gt)
+                l_d_r1 = r1_penalty(real_pred, self.gt)
+                l_d_r1 = (self.r1_penalty_coef / 2 * l_d_r1 * self.net_d_reg_every + 0 * real_pred[0])
+                # TODO: why do we need to add 0 * real_pred, otherwise, a runtime
+                # error will arise: RuntimeError: Expected to have finished
+                # reduction in the prior iteration before starting a new one.
+                # This error indicates that your module has parameters that were
+                # not used in producing loss.
+                loss_dict['l_d_r1'] = l_d_r1.detach().mean()
+            # l_d_r1.backward()
+            self.calc_gradients(l_d_r1)
 
-        self.optimizer_d.step()
+        # self.optimizer_d.step()
+        self.optimizer_step(self.optimizer_d)
 
         self.log_dict = self.reduce_loss_dict(loss_dict)
 

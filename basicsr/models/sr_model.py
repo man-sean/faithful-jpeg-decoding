@@ -7,6 +7,7 @@ from basicsr.utils.matlab_functions import imresize
 from basicsr.archs import build_network
 from basicsr.losses import build_loss
 from basicsr.metrics import calculate_metric
+from basicsr.utils.batch_util import expand_batch
 from basicsr.utils import get_root_logger, imwrite, tensor2img
 from basicsr.utils.registry import MODEL_REGISTRY
 from basicsr.utils.diffjpeg import DiffJPEG
@@ -77,6 +78,10 @@ class SRModel(BaseModel):
         self.setup_optimizers()
         self.setup_schedulers()
 
+        # set up AMP
+        self.setup_amp()
+        self.net_g = self.change_memory_format(self.net_g)
+
     def setup_optimizers(self):
         train_opt = self.opt['train']
         optim_params = []
@@ -93,35 +98,44 @@ class SRModel(BaseModel):
 
     def feed_data(self, data):
         self.lq = data['lq'].to(self.device)
+        self.lq = self.change_memory_format(self.lq)
         if 'gt' in data:
             self.gt = data['gt'].to(self.device)
+            self.gt = self.change_memory_format(self.gt)
+        if 'y' in data:
+            self.y = self.change_memory_format(data['y'].to(self.device))
+            self.cb = self.change_memory_format(data['cb'].to(self.device))
+            self.cr = self.change_memory_format(data['cr'].to(self.device))
         # add support for jpeg qf
         if 'qf' in data:
             self.qf = data['qf'].to(self.device)
 
     def optimize_parameters(self, current_iter):
-        self.optimizer_g.zero_grad()
-        self.output = self.net_g(self.lq)
+        # self.optimizer_g.zero_grad()
+        with self.cast():  # Use AMP if configured
+            self.output = self.net_g(x=self.lq, qf=self.qf)
 
-        l_total = 0
-        loss_dict = OrderedDict()
-        # pixel loss
-        if self.cri_pix:
-            l_pix = self.cri_pix(self.output, self.gt)
-            l_total += l_pix
-            loss_dict['l_pix'] = l_pix
-        # perceptual loss
-        if self.cri_perceptual:
-            l_percep, l_style = self.cri_perceptual(self.output, self.gt)
-            if l_percep is not None:
-                l_total += l_percep
-                loss_dict['l_percep'] = l_percep
-            if l_style is not None:
-                l_total += l_style
-                loss_dict['l_style'] = l_style
+            l_total = 0
+            loss_dict = OrderedDict()
+            # pixel loss
+            if self.cri_pix:
+                l_pix = self.cri_pix(self.output, self.gt)
+                l_total += l_pix
+                loss_dict['l_pix'] = l_pix
+            # perceptual loss
+            if self.cri_perceptual:
+                l_percep, l_style = self.cri_perceptual(self.output, self.gt)
+                if l_percep is not None:
+                    l_total += l_percep
+                    loss_dict['l_percep'] = l_percep
+                if l_style is not None:
+                    l_total += l_style
+                    loss_dict['l_style'] = l_style
 
-        l_total.backward()
-        self.optimizer_g.step()
+        # l_total.backward()
+        self.calc_gradients(l_total)
+        # self.optimizer_g.step()
+        self.optimizer_step(self.optimizer_g)
 
         self.log_dict = self.reduce_loss_dict(loss_dict)
 
@@ -231,6 +245,10 @@ class SRModel(BaseModel):
                     gt_img = tensor2img([visuals['gt']])
                     metric_data['img2'] = gt_img
                     del self.gt
+
+                if 'mean_result' in visuals:
+                    mean_sr_img = tensor2img([visuals['mean_result']])
+                    metric_data['mean_img'] = mean_sr_img
 
                 # tentative for out of GPU memory
                 del self.lq
