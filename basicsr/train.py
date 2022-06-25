@@ -118,6 +118,7 @@ def train_pipeline(root_path):
     tb_logger = init_tb_loggers(opt)
 
     # create train and validation dataloaders
+    logger.info('Setting up datasets.')
     result = create_train_val_dataloader(opt, logger)
     train_loader, train_sampler, val_loaders, total_epochs, total_iters = result
 
