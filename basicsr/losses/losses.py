@@ -600,7 +600,7 @@ def r1_penalty(real_pred, real_img):
         Eq. 9 in Which training methods for GANs do actually converge.
         """
     grad_real = autograd.grad(outputs=real_pred.sum(), inputs=real_img, create_graph=True)[0]
-    grad_penalty = grad_real.pow(2).view(grad_real.shape[0], -1).sum(1).mean()
+    grad_penalty = grad_real.pow(2).reshape(grad_real.shape[0], -1).sum(1).mean()
     return grad_penalty
 
 

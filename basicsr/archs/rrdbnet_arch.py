@@ -180,24 +180,22 @@ class RRDBNet(nn.Module):
 
         self.lrelu = nn.LeakyReLU(negative_slope=0.2, inplace=True)
 
-    def enforce_consistency(self, compressed, restored, qf):
+    def enforce_consistency(self, compressed, restored, qf, compressed_coeffs):
         if not self._enforce_consistency:
-            return restored
+            return restored, restored
 
         factor = DiffJPEG.quality_to_factor(deepcopy(qf))
-        compressor = CompressJpeg(rounding=lambda x: x).to(compressed.device)
+        compressor_dummy = CompressJpeg(rounding=lambda x: x).to(compressed.device)
         decompressor = DeCompressJpeg(rounding=lambda x: x).to(compressed.device)
 
-        compressed, c_padding = pad(compressed, padding=16)
         restored, r_padding = pad(restored, padding=16)
 
-        compressed_coeffs = compressor(compressed, factor=deepcopy(factor))
-        restored_coeffs = compressor(restored, factor=deepcopy(factor))
+        restored_coeffs = compressor_dummy(restored, factor=deepcopy(factor))
 
         for c_coeff, r_coeff in zip(compressed_coeffs, restored_coeffs):
             diff = (r_coeff - c_coeff)
             cond = (diff.abs() > 0.5)
-            r_coeff[cond] = c_coeff[cond] + diff[cond].sign() * 0.49
+            r_coeff[cond] = c_coeff[cond] + diff[cond].sign() * 0.4
             if torch.any((c_coeff - r_coeff).abs() > 0.5 + 1e-8):
                 cond = ((r_coeff - c_coeff).abs() > 0.5)
                 print(f'Coefficient deviation!\n{(r_coeff[cond]-c_coeff[cond])=}')
@@ -210,7 +208,7 @@ class RRDBNet(nn.Module):
 
         return restored, consistent
 
-    def forward(self, x, qf):
+    def forward(self, x, qf, y=None, cb=None, cr=None):
         # torchvision.utils.save_image(x[0], "/home/sean.man/RRDBNet_input_img.png")
         # torchvision.utils.save_image(x[16], "/home/sean.man/RRDBNet_input_img_16.png")
         # print(f'{x.shape=} {x.dtype=}')
@@ -250,6 +248,6 @@ class RRDBNet(nn.Module):
 
         # enforce consistency if necessary
         with record_function('enforce_consistency'):
-            out = self.enforce_consistency(x, out, qf)
+            _, out = self.enforce_consistency(x, out, qf, (y, cb, cr))
 
         return out

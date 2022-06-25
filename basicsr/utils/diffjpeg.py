@@ -68,6 +68,11 @@ class RGB2YCbCrJpeg(nn.Module):
         super(RGB2YCbCrJpeg, self).__init__()
         matrix = np.array([[0.299, 0.587, 0.114], [-0.168736, -0.331264, 0.5], [0.5, -0.418688, -0.081312]],
                           dtype=np.float32).T
+        # matrix = np.array([
+        #     np.array([0.299, 0.587, 0.114]),
+        #     np.array([-0.299, -0.587, 0.886]) / 1.772,
+        #     np.array([0.701, -0.587, -0.144]) / 1.402,
+        # ], dtype=np.float32).T
         self.shift = nn.Parameter(torch.tensor([0., 128., 128.]))
         self.matrix = nn.Parameter(torch.from_numpy(matrix))
 
@@ -81,7 +86,7 @@ class RGB2YCbCrJpeg(nn.Module):
         """
         image = image.permute(0, 2, 3, 1)
         result = torch.tensordot(image, self.matrix, dims=1) + self.shift
-        return result.view(image.shape)
+        return result.view(image.shape).clamp(0, 255)
 
 
 class ChromaSubsampling(nn.Module):
@@ -389,6 +394,16 @@ class YCbCr2RGBJpeg(nn.Module):
         super(YCbCr2RGBJpeg, self).__init__()
 
         matrix = np.array([[1., 0., 1.402], [1, -0.344136, -0.714136], [1, 1.772, 0]], dtype=np.float32).T
+        # matrix = np.array([
+        #     np.array([1., 0., 1.402]),
+        #     np.array([1, -(0.114 * 1.772) / 0.587, -(0.299 * 1.402) / 0.587]),
+        #     np.array([1, 1.772, 0]),
+        # ], dtype=np.float32).T
+        # matrix = np.linalg.inv(np.array([
+        #     np.array([0.299, 0.587, 0.114]),
+        #     np.array([-0.299, -0.587, 0.886])/1.772,
+        #     np.array([0.701, -0.587, -0.144])/1.402,
+        #     ], dtype=np.float32).T)
         self.shift = nn.Parameter(torch.tensor([0, -128., -128.]))
         self.matrix = nn.Parameter(torch.from_numpy(matrix))
 
@@ -400,7 +415,7 @@ class YCbCr2RGBJpeg(nn.Module):
         Returns:
             Tensor: batch x 3 x height x width
         """
-        result = torch.tensordot(image + self.shift, self.matrix, dims=1)
+        result = torch.tensordot(image + self.shift, self.matrix, dims=1).clamp(0, 255)
         return result.view(image.shape).permute(0, 3, 1, 2)
 
 

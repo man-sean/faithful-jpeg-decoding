@@ -94,7 +94,7 @@ def calculate_psnr(img, img2, crop_border, input_order='HWC', test_y_channel=Fal
 # TODO: update the description of this function.
 # TODO: can we support more than single qf? do we need to?
 @METRIC_REGISTRY.register()
-def calculate_jpeg_faithfulness_rmse(img, gt_lq, crop_border, qf, input_order='HWC', test_y_channel=False, **kwargs):
+def calculate_jpeg_faithfulness_rmse(img, img2, gt_lq, crop_border, qf, input_order='HWC', test_y_channel=False, **kwargs):
     """Calculate JPEG Faithfulness RMSE (Root Mean Square Error).
 
     Args:
@@ -111,6 +111,7 @@ def calculate_jpeg_faithfulness_rmse(img, gt_lq, crop_border, qf, input_order='H
     """
     jpeger = DiffJPEG(differentiable=True)
     result_lq = tensor2img(jpeger(img2tensor(img / 255.).unsqueeze(0), quality=qf).squeeze(0))
+    # gt_lq = tensor2img(jpeger(img2tensor(img2 / 255.).unsqueeze(0), quality=qf).squeeze(0))
     assert result_lq.shape == gt_lq.shape, (f'LQ image shapes are different: {result_lq.shape}, {gt_lq.shape}.')
     if input_order not in ['HWC', 'CHW']:
         raise ValueError(f'Wrong input_order {input_order}. Supported input_orders are ' '"HWC" and "CHW"')

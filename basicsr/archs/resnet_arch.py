@@ -64,7 +64,8 @@ class ResNetGANStabilityDiscriminator(nn.Module):
         out = self.resnet_5_0(out)
         out = self.resnet_5_1(out)
 
-        out = out.view(batch_size, 16*self.nf*self.s0*self.s0)
+        # out = out.view(batch_size, 16*self.nf*self.s0*self.s0)
+        out = out.reshape(batch_size, -1)
         out = self.fc(actvn(out))
 
         return out

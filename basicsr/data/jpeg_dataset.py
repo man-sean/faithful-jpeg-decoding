@@ -2,6 +2,9 @@ import cv2
 import os
 import torch
 import numpy as np
+from copy import deepcopy
+
+from basicsr.archs.arch_util import pad
 from basicsr.data.data_util import paths_from_lmdb, paths_from_folder
 from torch.utils import data as data
 from torchvision.transforms.functional import normalize, center_crop
@@ -10,7 +13,7 @@ from basicsr.data.degradations import add_jpg_compression
 from basicsr.data.transforms import augment, mod_crop, paired_random_crop
 from basicsr.utils import FileClient, imfrombytes, img2tensor, scandir, get_root_logger
 from basicsr.utils.registry import DATASET_REGISTRY
-from basicsr.utils.diffjpeg import DiffJPEG
+from basicsr.utils.diffjpeg import DiffJPEG, CompressJpeg, quality_to_factor, q_table, y_table, c_table
 
 
 @DATASET_REGISTRY.register()
@@ -60,6 +63,7 @@ class JPEGDataset(data.Dataset):
         # logger = get_root_logger()
         # logger.info(f'Using DiffJPEG version {diffjpeg_version}.')
         self.jpeger = DiffJPEG(differentiable=True)
+        self.compressor = CompressJpeg(rounding=torch.round)
 
     def _sample_qf(self):
         qf = self.opt['qf']
@@ -109,9 +113,15 @@ class JPEGDataset(data.Dataset):
         img_lq = torch.clamp((img_lq * 255.0).round(), 0, 255) / 255.
 
         # generate lq image
-        # downsample
         # add JPEG compression
         qf = self._sample_qf()
+        y, cb, cr = self.compressor(image=pad(img_lq.unsqueeze(0), padding=16)[0],
+                                    factor=self.jpeger.quality_to_factor(qf))
+        y, cb, cr = (
+            y.squeeze(0).detach(),
+            cb.squeeze(0).detach(),
+            cr.squeeze(0).detach(),
+        )
         img_lq = self.jpeger(img_lq.unsqueeze(0), quality=qf).squeeze(0).detach()
 
         # normalize
@@ -129,6 +139,9 @@ class JPEGDataset(data.Dataset):
                 'lq_path': gt_path,
                 'gt_path': gt_path,
                 'qf': qf,
+                'y': y,
+                'cb': cb,
+                'cr': cr,
                 }
 
     def __len__(self):

@@ -65,7 +65,7 @@ def get_collage(batch, model, expansion, keep=1, create_lq_fn=lambda x: x):
     # jpeger = DiffJPEG(differentiable=True)
 
     # expand batch
-    inputs = ["gt", "lq", "qf"]
+    inputs = ["gt", "lq", "qf", "y", "cb", "cr"]
     xbatch = {k: expand_batch(v, expansion) for k, v in batch.items() if k in inputs}
 
     # generate fakes

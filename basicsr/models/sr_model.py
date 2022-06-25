@@ -356,7 +356,7 @@ class SRModel(BaseModel):
             for r in range(realizations):
                 imwrite(_rgb_to_bgr(fake[r]), path + f'_fake_{r}.png')
                 imwrite(_rgb_to_bgr(recompressed[r]), path + f'_fake_compressed_{r}.png')
-                imwrite(_rgb_to_bgr(diff[r]), path + f'_diff_{r}.png')
+                imwrite(_rgb_to_bgr(diff[r] ** (1 / 4)), path + f'_diff_{r}.png')
 
             saved_images += 1
             pbar.update()
