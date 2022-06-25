@@ -19,7 +19,9 @@ class NoiseInjectionCat(nn.Module):
     def forward(self, x, noise_std=1.0):
         batch, _, height, width = x.shape
         noise = x.new_empty(batch, 1, height, width).normal_() * noise_std
-        return torch.cat((x, self.weight * noise), dim=1)
+        with record_function('noise_inject_cat'):
+            out = torch.cat((x, self.weight * noise), dim=1)
+        return out
 
 
 class NoiseInjectionAdd(nn.Module):
@@ -31,12 +33,28 @@ class NoiseInjectionAdd(nn.Module):
     def forward(self, x, noise_std=1.0):
         batch, _, height, width = x.shape
         noise = x.new_empty(batch, 1, height, width).normal_() * noise_std * self.weight
-        return x + noise
+        with record_function('noise_inject_add'):
+            out = x + noise
+        return out
+
+
+class NoiseInjectionCopy(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(1, 1, 1, 1))
+
+    def forward(self, x, noise_std=1.0):
+        batch, _, height, width = x.shape
+        noise = x.new_empty(batch, height, width).normal_() * noise_std
+        with record_function('noise_inject_copy'):
+            x[:, -1, :, :] = self.weight * noise
+        return x
 
 
 noise_factory = {
     'cat': NoiseInjectionCat,
     'add': NoiseInjectionAdd,
+    'copy': NoiseInjectionCopy,
 }
 
 
