@@ -208,7 +208,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '-p',
         required=True,
-        choices=['JPEG', 'png'],
+        choices=['JPEG', 'png', 'jpg'],
         help='Images format',
     )
     args = parser.parse_args()

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import cv2
+import argparse
 import numpy as np
 import os
 import sys
@@ -41,22 +42,36 @@ def main():
         Remember to modify opt configurations according to your settings.
     """
 
-    src_root = Path('/home/sean.man/datasets/imagenet/train')
-    dst_root = Path('/home/sean.man/datasets/imagenet_patch_128/train_small')
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('src', type=Path, help='Path to src folder.')
+    parser.add_argument('dst', type=Path, help='Path to dst folder.')
+    parser.add_argument('--n-thread', type=int, default=20, help='size of thread pool')
+    parser.add_argument('--compression-level', type=int, default=3, help='png compression level')
+    parser.add_argument('--crop-size', type=int, default=128, help='patch size to be extracted')
+    parser.add_argument('--step-size', type=int, default=128, help='step between patches')
+    parser.add_argument('--thresh-size', type=int, default=0, help='threshold to accept smaller patches')
+    args = parser.parse_args()
+
+    src_root = args.src
+    dst_root = args.dst
 
     subdirs = [os.path.basename(x[0]) for x in os.walk(src_root) if x[0] != str(src_root)]
 
-    print(f'Found {len(subdirs)} subdirs', flush=True)
+    if len(subdirs) == 0:
+        print(f"Didn't found any subdirectories, working on root directory {src_root}", flush=True)
+        subdirs = ['']
+    else:
+        print(f'Found {len(subdirs)} subdirs', flush=True)
 
     for subdir in subdirs:
         opt = {
-            'n_thread': 20,
-            'compression_level': 3,
+            'n_thread': args.n_thread,
+            'compression_level': args.compression_level,
             'input_folder': src_root / subdir,
             'save_folder': dst_root / subdir,
-            'crop_size': 128,
-            'step': 128, #64,
-            'thresh_size': 0,
+            'crop_size': args.crop_size,
+            'step': args.step_size,
+            'thresh_size': args.thresh_size,
         }
         extract_subimages(opt)
 
