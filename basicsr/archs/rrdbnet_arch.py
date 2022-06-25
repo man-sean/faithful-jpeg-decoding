@@ -68,14 +68,15 @@ class ResidualDenseBlock(nn.Module):
         num_grow_ch (int): Channels for each growth.
     """
 
-    def __init__(self, num_feat=64, num_grow_ch=32, noise_injection=False, noise_type='cat'):
+    def __init__(self, num_feat=64, num_grow_ch=32, noise_injection=False, noise_type='cat', spectral_norm=False):
         super(ResidualDenseBlock, self).__init__()
+        sn = nn.utils.spectral_norm if spectral_norm else lambda x: x
         add_ch = 1 if (noise_injection and noise_type in ['cat']) else 0
-        self.conv1 = nn.Conv2d(add_ch + num_feat, num_grow_ch, 3, 1, 1)
-        self.conv2 = nn.Conv2d(add_ch + num_feat + num_grow_ch, num_grow_ch, 3, 1, 1)
-        self.conv3 = nn.Conv2d(add_ch + num_feat + 2 * num_grow_ch, num_grow_ch, 3, 1, 1)
-        self.conv4 = nn.Conv2d(add_ch + num_feat + 3 * num_grow_ch, num_grow_ch, 3, 1, 1)
-        self.conv5 = nn.Conv2d(add_ch + num_feat + 4 * num_grow_ch, num_feat, 3, 1, 1)
+        self.conv1 = sn(nn.Conv2d(add_ch + num_feat, num_grow_ch, 3, 1, 1))
+        self.conv2 = sn(nn.Conv2d(add_ch + num_feat + num_grow_ch, num_grow_ch, 3, 1, 1))
+        self.conv3 = sn(nn.Conv2d(add_ch + num_feat + 2 * num_grow_ch, num_grow_ch, 3, 1, 1))
+        self.conv4 = sn(nn.Conv2d(add_ch + num_feat + 3 * num_grow_ch, num_grow_ch, 3, 1, 1))
+        self.conv5 = sn(nn.Conv2d(add_ch + num_feat + 4 * num_grow_ch, num_feat, 3, 1, 1))
 
         self.lrelu = nn.LeakyReLU(negative_slope=0.2, inplace=True)
 
@@ -108,11 +109,11 @@ class RRDB(nn.Module):
         num_grow_ch (int): Channels for each growth.
     """
 
-    def __init__(self, num_feat, num_grow_ch=32, noise_injection=False, noise_type='cat'):
+    def __init__(self, num_feat, num_grow_ch=32, noise_injection=False, noise_type='cat', spectral_norm=False):
         super(RRDB, self).__init__()
-        self.rdb1 = ResidualDenseBlock(num_feat, num_grow_ch, noise_injection, noise_type)
-        self.rdb2 = ResidualDenseBlock(num_feat, num_grow_ch, noise_injection, noise_type)
-        self.rdb3 = ResidualDenseBlock(num_feat, num_grow_ch, noise_injection, noise_type)
+        self.rdb1 = ResidualDenseBlock(num_feat, num_grow_ch, noise_injection, noise_type, spectral_norm)
+        self.rdb2 = ResidualDenseBlock(num_feat, num_grow_ch, noise_injection, noise_type, spectral_norm)
+        self.rdb3 = ResidualDenseBlock(num_feat, num_grow_ch, noise_injection, noise_type, spectral_norm)
 
     def forward(self, x):
         out = self.rdb1(x)
@@ -154,6 +155,7 @@ class RRDBNet(nn.Module):
                  noise_injection_upsample=False,
                  enforce_consistency=False,
                  noise_type='cat',
+                 spectral_norm=False,
                  ):
         super(RRDBNet, self).__init__()
         self.scale = scale
@@ -162,18 +164,19 @@ class RRDBNet(nn.Module):
             num_in_ch = num_in_ch * 4
         elif scale == 1:
             num_in_ch = num_in_ch * 16
+        sn = nn.utils.spectral_norm if spectral_norm else lambda x: x
         add_ch = 1 if (noise_injection and noise_injection_upsample and noise_type in ['cat']) else 0
-        self.conv_first = nn.Conv2d(num_in_ch, num_feat, 3, 1, 1)
+        self.conv_first = sn(nn.Conv2d(num_in_ch, num_feat, 3, 1, 1))
         self.body = make_layer(RRDB, num_block, num_feat=num_feat, num_grow_ch=num_grow_ch,
-                               noise_injection=noise_injection, noise_type=noise_type)
-        self.conv_body = nn.Conv2d(num_feat, num_feat, 3, 1, 1)
+                               noise_injection=noise_injection, noise_type=noise_type, spectral_norm=spectral_norm)
+        self.conv_body = sn(nn.Conv2d(num_feat, num_feat, 3, 1, 1))
         # upsample
-        self.conv_up1 = nn.Conv2d(num_feat + add_ch, num_feat, 3, 1, 1)
-        self.conv_up2 = nn.Conv2d(num_feat + add_ch, num_feat, 3, 1, 1)
+        self.conv_up1 = sn(nn.Conv2d(num_feat + add_ch, num_feat, 3, 1, 1))
+        self.conv_up2 = sn(nn.Conv2d(num_feat + add_ch, num_feat, 3, 1, 1))
         self.ni_1 = noise_factory[noise_type]() if (noise_injection and noise_injection_upsample) else nn.Identity()
         self.ni_2 = noise_factory[noise_type]() if (noise_injection and noise_injection_upsample) else nn.Identity()
-        self.conv_hr = nn.Conv2d(num_feat, num_feat, 3, 1, 1)
-        self.conv_last = nn.Conv2d(num_feat, num_out_ch, 3, 1, 1)
+        self.conv_hr = sn(nn.Conv2d(num_feat, num_feat, 3, 1, 1))
+        self.conv_last = sn(nn.Conv2d(num_feat, num_out_ch, 3, 1, 1))
 
         self.lrelu = nn.LeakyReLU(negative_slope=0.2, inplace=True)
 
