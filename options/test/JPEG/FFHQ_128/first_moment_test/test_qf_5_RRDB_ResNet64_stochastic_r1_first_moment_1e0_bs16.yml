@@ -1,5 +1,6 @@
-name: ESRGAN_x1_qf_5_deterministic_regression_FFHQ128
-model_type: SRModel
+# general settings
+name: ESRGAN_x1_qf_5_nf64_r1_stochastic_first_moment_bs16_1e0_FFHQ128
+model_type: ESRGANModel
 scale: 1
 num_gpu: 1  # set num_gpu: 0 for cpu mode
 manual_seed: 0
@@ -37,12 +38,12 @@ network_g:
   num_feat: 64
   num_block: 23
   scale: 1
-  noise_injection: false
-  noise_injection_upsample: false
+  noise_injection: true
+  noise_injection_upsample: true
 
 # path
 path:
-  pretrain_network_g: /home/sean.man/faithful-jpeg-decoding/experiments/ESRGAN_x1_qf_5_deterministic_regression_FFHQ128/models/net_g_1000000.pth
+  pretrain_network_g: /home/sean.man/faithful-jpeg-decoding/experiments/ESRGAN_x1_qf_5_nf64_r1_stochastic_first_moment_bs16_1e0_FFHQ128/models/net_g_400000.pth
   strict_load_g: true
 
 # validation settings
@@ -73,7 +74,7 @@ path:
 #
 ## FID settings
 #fid:
-#  repeat: 2
+#  repeat: 32
 #  opt:
 #    type: calculate_fid_given_paths
 #    gt_path: /home/sean.man/datasets/ffhq_128/train_fid_stats.npz
@@ -86,4 +87,4 @@ path:
 collage:
 #  idx_to_save: [0, 1, 14, 15, 121, 123]
   idx_to_save: [3, 7, 621, 649, 844, 876, 910, 919, 942]
-  realizations: 2
+  realizations: 8

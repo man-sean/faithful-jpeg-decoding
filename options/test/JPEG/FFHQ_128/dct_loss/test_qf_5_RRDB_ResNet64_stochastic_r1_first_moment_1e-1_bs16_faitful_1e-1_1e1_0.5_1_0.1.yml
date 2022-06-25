@@ -43,10 +43,9 @@ network_g:
 
 # path
 path:
-  pretrain_network_g: /home/sean.man/faithful-jpeg-decoding/experiments/ESRGAN_x1_qf_5_nf64_r1_stochastic_first_moment_bs16_1e-1_faithful_1e-1_1e1_0.5_1_0.1_FFHQ128/models/net_g_360000.pth
+  pretrain_network_g: /home/sean.man/faithful-jpeg-decoding/experiments/ESRGAN_x1_qf_5_nf64_r1_stochastic_first_moment_bs16_1e-1_faithful_1e-1_1e1_0.5_1_0.1_FFHQ128/models/net_g_400000.pth
   strict_load_g: true
 
-# validation settings
 #val:
 #  save_img: false #true
 #  suffix: ~  # add suffix to saved images, if None, use exp name
@@ -54,6 +53,11 @@ path:
 #  metrics:
 #    psnr: # metric name, can be arbitrary
 #      type: calculate_psnr
+#      crop_border: 0
+#      test_y_channel: false
+#    avg_psnr: # metric name, can be arbitrary
+#      type: calculate_avg_psnr
+#      expansion: 64
 #      crop_border: 0
 #      test_y_channel: false
 #    ssim:
@@ -66,8 +70,8 @@ path:
 #      qf: 5
 #      test_y_channel: false
 #      better: lower  # the lower, the better
-
-# FID settings
+#
+## FID settings
 #fid:
 #  repeat: 2
 #  opt:
@@ -80,5 +84,5 @@ path:
 
 # collage settings
 collage:
-  idx_to_save: [0, 1, 121, 123]
-  realizations: 4
+  idx_to_save: [0, 1, 14, 15, 121, 123]
+  realizations: 8
