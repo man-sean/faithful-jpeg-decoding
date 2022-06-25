@@ -128,16 +128,36 @@ class SRModel(BaseModel):
         if self.ema_decay > 0:
             self.model_ema(decay=self.ema_decay)
 
-    def test(self):
+    def test(self, split=1):
+        def chunks(tensor, split):
+            """Yield successive n-sized chunks from lst."""
+            bs = tensor.shape[0]
+            n = 1 if bs == 1 else bs // split
+            for i in range(0, bs, n):
+                yield tensor[i:i + n]
+
         if hasattr(self, 'net_g_ema'):
             self.net_g_ema.eval()
-            with torch.no_grad():
-                self.output = self.net_g_ema(self.lq, self.qf)
+            model = self.net_g_ema
         else:
             self.net_g.eval()
-            with torch.no_grad():
-                self.output = self.net_g(self.lq, self.qf)
+            model = self.net_g
+
+        with torch.no_grad():
+            output = []
+            for lq_chunk, qf_chunk, y_chunk, cb_chunk, cr_chunk in zip(
+                    chunks(self.lq, split),
+                    chunks(self.qf, split),
+                    chunks(self.y, split),
+                    chunks(self.cb, split),
+                    chunks(self.cr, split),
+            ):
+                output.append(model(lq_chunk, qf_chunk, y_chunk, cb_chunk, cr_chunk))
+            self.output = torch.cat(output, dim=0)
+
+        if not hasattr(self, 'net_g_ema'):
             self.net_g.train()
+
         if isinstance(self.output, tuple):  # in case we get two versions of the output image
             self.output_unconstrained, self.output = self.output
 
@@ -167,14 +187,39 @@ class SRModel(BaseModel):
         if self.opt['is_train']:
             log_collage(dataloader=dataloader, model=self, global_step=current_iter)
 
+        if with_metrics and 'avg_psnr' in self.opt['val']['metrics']:
+            assert dataloader.batch_size == 1, "'avg_psnr' currently work only with batch size 1"
+            expansion = self.opt['val']['metrics']['avg_psnr']['expansion']
+        else:
+            expansion = 1
+
         with tempfile.TemporaryDirectory() as tmpdirname:
-            # jpeger = DiffJPEG(differentiable=True)
             for idx, val_data in enumerate(dataloader):
+                # print(f"[{idx: <4}]: {val_data['lq'].shape}")
+                img_h, img_w = val_data['lq'].shape[-2], val_data['lq'].shape[-1]
+                split = 1 + ((img_h * img_w) // (2000 * 1000))
+                if split > 1: print(f"[!] Using {split=} due to image resolution ({img_h}, {img_w})")
+
+                # if image resultion is too large, split inference to multiple passes
+                if expansion > 1:
+                    val_data['lq'] = expand_batch(val_data['lq'], expansion)
+                    val_data['gt'] = expand_batch(val_data['gt'], expansion)
+                    val_data['qf'] = expand_batch(val_data['qf'], expansion)
+                    val_data['y'] = expand_batch(val_data['y'], expansion)
+                    val_data['cb'] = expand_batch(val_data['cb'], expansion)
+                    val_data['cr'] = expand_batch(val_data['cr'], expansion)
+
                 img_name = osp.splitext(osp.basename(val_data['lq_path'][0]))[0]
                 self.feed_data(val_data)
-                self.test()
+                self.test(split=split)
 
                 visuals = self.get_current_visuals()
+                if expansion > 1:
+                    mean_result = visuals['result'].mean(0)
+                    for key in visuals:
+                        visuals[key] = visuals[key][0:1]
+                    visuals['mean_result'] = mean_result
+
                 sr_img = tensor2img([visuals['result']])
                 sr_img_tensor = visuals['result']
                 metric_data['img'] = sr_img

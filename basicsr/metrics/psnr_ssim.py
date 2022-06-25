@@ -91,6 +91,29 @@ def calculate_psnr(img, img2, crop_border, input_order='HWC', test_y_channel=Fal
     return 20. * np.log10(255. / np.sqrt(mse))
 
 
+@METRIC_REGISTRY.register()
+def calculate_avg_psnr(mean_img, img2, crop_border, input_order='HWC', test_y_channel=False, **kwargs):
+    """Calculate Average PSNR (Peak Signal-to-Noise Ratio).
+
+    Ref: https://en.wikipedia.org/wiki/Peak_signal-to-noise_ratio
+
+    Args:
+        mean_img (ndarray): Mean Images with range [0, 255].
+        img2 (ndarray): Images with range [0, 255].
+        crop_border (int): Cropped pixels in each edge of an image. These
+            pixels are not involved in the PSNR calculation.
+        input_order (str): Whether the input order is 'HWC' or 'CHW'.
+            Default: 'HWC'.
+        test_y_channel (bool): Test on Y channel of YCbCr. Default: False.
+
+    Returns:
+        float: psnr result.
+    """
+
+    return calculate_psnr(img=mean_img, img2=img2, crop_border=crop_border,
+                          input_order=input_order, test_y_channel=test_y_channel)
+
+
 # TODO: update the description of this function.
 # TODO: can we support more than single qf? do we need to?
 @METRIC_REGISTRY.register()
